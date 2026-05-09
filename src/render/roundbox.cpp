@@ -1,5 +1,6 @@
 #include "roundbox.h"
 #include "gl_context.h"
+#include <cmath>
 #include <iostream>
 
 namespace bl_ui {
@@ -35,21 +36,34 @@ in  vec2 vUV;
 out vec4 fragColor;
 
 uniform vec2  uSize;       // rect size in px (for SDF space)
-uniform float uRadius;     // corner radius px
+uniform vec4  uRadius4;    // per-corner radii px: top-left, top-right, bottom-left, bottom-right
 uniform vec4  uColorBg;    // inner fill (RGBA, premultiplied expected)
 uniform vec4  uColorOut;   // outline color
 uniform float uOutWidth;   // outline thickness px (0 = no outline)
 
-float roundedRectSDF(vec2 p, vec2 b, float r) {
-    vec2 d = abs(p) - b + r;
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
+// Per-corner SDF. Coordinate space: p.y < 0 = top half, p.y > 0 = bottom half
+// (screen y=0 is at top, so p.y increases downward in SDF space).
+// uRadius4: (top-left, top-right, bottom-left, bottom-right)
+float roundedRectSDF(vec2 p, vec2 b, vec4 r) {
+    float rx = (p.x > 0.0) ? ((p.y > 0.0) ? r.w : r.y)
+                            : ((p.y > 0.0) ? r.z : r.x);
+    vec2 d = abs(p) - b + rx;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - rx;
 }
 
 void main() {
     vec2 p = (vUV - 0.5) * uSize;
-    float d   = roundedRectSDF(p, uSize * 0.5, uRadius);
-    float aa  = fwidth(d);
-    float alpha = 1.0 - smoothstep(-aa, aa, d);
+    float d = roundedRectSDF(p, uSize * 0.5, uRadius4);
+
+    float maxR = max(max(uRadius4.x, uRadius4.y), max(uRadius4.z, uRadius4.w));
+    float alpha;
+    if (maxR < 0.5 && uOutWidth <= 0.0) {
+        // Axis-aligned solid rect (lines, fills): hard edge, no AA blur.
+        alpha = d < 0.0 ? 1.0 : 0.0;
+    } else {
+        float aa = fwidth(d);
+        alpha = 1.0 - smoothstep(-aa, aa, d);
+    }
 
     vec4 col;
     if (uOutWidth > 0.0 && d > -uOutWidth) {
@@ -105,7 +119,7 @@ bool Roundbox::init() {
     _u_rect      = glGetUniformLocation(_prog, "uRect");
     _u_viewport  = glGetUniformLocation(_prog, "uViewport");
     _u_size      = glGetUniformLocation(_prog, "uSize");
-    _u_radius    = glGetUniformLocation(_prog, "uRadius");
+    _u_radius4   = glGetUniformLocation(_prog, "uRadius4");
     _u_color_bg  = glGetUniformLocation(_prog, "uColorBg");
     _u_color_out = glGetUniformLocation(_prog, "uColorOut");
     _u_out_width = glGetUniformLocation(_prog, "uOutWidth");
@@ -151,14 +165,14 @@ void Roundbox::set_viewport(float width, float height) {
 }
 
 void Roundbox::draw_roundbox(float x, float y, float w, float h,
-                              float radius,
+                              float r_tl, float r_tr, float r_bl, float r_br,
                               RGBA fill, RGBA outline, float outline_w) {
     glUseProgram(_prog);
 
     glUniform4f(_u_rect,      x, y, w, h);
     glUniform2f(_u_viewport,  _vp_w, _vp_h);
     glUniform2f(_u_size,      w, h);
-    glUniform1f(_u_radius,    radius);
+    glUniform4f(_u_radius4,   r_tl, r_tr, r_bl, r_br);
     glUniform4f(_u_color_bg,  fill.rf(),    fill.gf(),    fill.bf(),    fill.af());
     glUniform4f(_u_color_out, outline.rf(), outline.gf(), outline.bf(), outline.af());
     glUniform1f(_u_out_width, outline_w);
@@ -170,12 +184,18 @@ void Roundbox::draw_roundbox(float x, float y, float w, float h,
     glBindVertexArray(0);
 }
 
+void Roundbox::draw_roundbox(float x, float y, float w, float h,
+                              float radius,
+                              RGBA fill, RGBA outline, float outline_w) {
+    draw_roundbox(x, y, w, h, radius, radius, radius, radius, fill, outline, outline_w);
+}
+
 void Roundbox::draw_rect_filled(float x, float y, float w, float h, RGBA color) {
     draw_roundbox(x, y, w, h, 0.f, color);
 }
 
 void Roundbox::draw_line_h(float x, float y, float len, RGBA color) {
-    draw_roundbox(x, y, len, 1.f, 0.f, color);
+    draw_roundbox(x, std::round(y), len, 1.f, 0.f, color);
 }
 
 void Roundbox::draw_line_v(float x, float y, float h, RGBA color) {

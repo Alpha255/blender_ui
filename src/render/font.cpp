@@ -17,23 +17,36 @@ namespace bl_ui {
 
 static const char* TEXT_VERT = R"GLSL(
 #version 330 core
-layout(location = 0) in vec4 aVertex; // (x, y, u, v)
+layout(location = 0) in vec4 aVertex; // (screen_x, screen_y, texel_u, texel_v)
 uniform mat4 uProj;
-out vec2 vTex;
+out vec2 vTexel;  // atlas texel-space coordinates (0..atlas_w, 0..atlas_h)
 void main() {
-    vTex = aVertex.zw;
+    vTexel = aVertex.zw;
     gl_Position = uProj * vec4(aVertex.xy, 0.0, 1.0);
 }
 )GLSL";
 
+// Manual bilinear filtering — mirrors Blender's gpu_shader_text_frag.glsl.
+// Uses texelFetch (integer pixel lookup) instead of texture() so the GPU
+// sampler never blends across glyph atlas boundaries.
+// vTexel is in atlas pixel space: 0 = left edge of pixel 0, integer N = boundary
+// between pixels N-1 and N.  fract(vTexel - 0.5) gives bilinear sub-pixel weights.
 static const char* TEXT_FRAG = R"GLSL(
 #version 330 core
-in  vec2 vTex;
+in  vec2 vTexel;
 out vec4 fragColor;
-uniform sampler2D uTex;
+uniform sampler2D uTex;       // glyph atlas (GL_NEAREST, single-channel)
+uniform ivec2     uAtlasSize; // atlas dimensions (512, 512)
 uniform vec4      uColor;
 void main() {
-    float a = texture(uTex, vTex).r;
+    vec2  f = fract(vTexel - 0.5);
+    ivec2 t = ivec2(floor(vTexel - 0.5));
+    ivec2 sz = uAtlasSize - ivec2(1);
+    float tl = texelFetch(uTex, clamp(t,               ivec2(0), sz), 0).r;
+    float tr = texelFetch(uTex, clamp(t + ivec2(1, 0), ivec2(0), sz), 0).r;
+    float bl = texelFetch(uTex, clamp(t + ivec2(0, 1), ivec2(0), sz), 0).r;
+    float br = texelFetch(uTex, clamp(t + ivec2(1, 1), ivec2(0), sz), 0).r;
+    float a  = mix(mix(tl, tr, f.x), mix(bl, br, f.x), f.y);
     fragColor = vec4(uColor.rgb, uColor.a * a);
 }
 )GLSL";
@@ -156,8 +169,9 @@ bool Font::_bake(const char* path, float px_size) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RED,
                  _atlas_w, _atlas_h, 0,
                  GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // GL_NEAREST: let the fragment shader do manual bilinear (mirrors Blender).
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -166,9 +180,10 @@ bool Font::_bake(const char* path, float px_size) {
 
 void Font::_setup_gl() {
     _prog = compile_shader(TEXT_VERT, TEXT_FRAG);
-    _u_proj  = glGetUniformLocation(_prog, "uProj");
-    _u_tex   = glGetUniformLocation(_prog, "uTex");
-    _u_color = glGetUniformLocation(_prog, "uColor");
+    _u_proj       = glGetUniformLocation(_prog, "uProj");
+    _u_tex        = glGetUniformLocation(_prog, "uTex");
+    _u_color      = glGetUniformLocation(_prog, "uColor");
+    _u_atlas_size = glGetUniformLocation(_prog, "uAtlasSize");
 
     glGenVertexArrays(1, &_vao);
     glGenBuffers(1, &_vbo);
@@ -185,6 +200,7 @@ void Font::_setup_gl() {
 bool Font::load(float size_pt, float dpi, float content_scale) {
     _content_scale = (content_scale > 0.f) ? content_scale : 1.f;
     float px_size  = size_pt * dpi * _content_scale / 72.f;
+    //float px_size = size_pt * _content_scale;
 
     for (int i = 0; FONT_PATHS[i]; ++i) {
         if (_bake(FONT_PATHS[i], px_size)) {
@@ -267,10 +283,14 @@ void Font::draw_text(std::string_view text, float x, float y,
         float qx1 = cx + bc->xoff2;
         float qy1 = baseline + bc->yoff2;
 
-        float qs0 = bc->x0 / float(_atlas_w);
-        float qt0 = bc->y0 / float(_atlas_h);
-        float qs1 = bc->x1 / float(_atlas_w);
-        float qt1 = bc->y1 / float(_atlas_h);
+        // Texel-space UVs: integer atlas pixel coordinates (not normalized).
+        // The fragment shader uses fract(vTexel - 0.5) for bilinear weights,
+        // so integer values land exactly at texel boundaries, giving proper
+        // per-texel coverage across the 2× oversampled glyph region.
+        float qs0 = float(bc->x0);
+        float qt0 = float(bc->y0);
+        float qs1 = float(bc->x1);
+        float qt1 = float(bc->y1);
 
         verts.insert(verts.end(), {qx0,qy0,qs0,qt0,  qx1,qy0,qs1,qt0,  qx1,qy1,qs1,qt1});
         verts.insert(verts.end(), {qx0,qy0,qs0,qt0,  qx1,qy1,qs1,qt1,  qx0,qy1,qs0,qt1});
@@ -299,6 +319,7 @@ void Font::draw_text(std::string_view text, float x, float y,
     glUniformMatrix4fv(_u_proj, 1, GL_FALSE, proj);
     glUniform1i(_u_tex, 0);
     glUniform4f(_u_color, color.rf(), color.gf(), color.bf(), color.af());
+    glUniform2i(_u_atlas_size, _atlas_w, _atlas_h);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, _atlas);

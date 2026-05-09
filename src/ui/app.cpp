@@ -15,6 +15,11 @@ App::App(int width, int height, const char* title) {
     // Query content scale (HiDPI factor, e.g. 1.5 on 150% Windows scaling)
     _ctx.get_content_scale(_content_scale, _content_scale);
 
+    // Compute layout metrics using Blender's WM_window_dpi_set_userdef formula:
+    // widget_unit = round(18 * scale_factor) + 2 * pixelsize
+    // This is NOT simple multiplication — at 1.5x it gives 29, not 30.
+    Theme::set_ui_scale(_content_scale);
+
     // Logical (window) size — this is the UI coordinate system.
     // On HiDPI the framebuffer is content_scale× larger, but the window size
     // and mouse coordinates are always in logical pixels.
@@ -33,7 +38,7 @@ App::App(int width, int height, const char* title) {
     // Our stb_truetype has no hinting — FreeType's hinting makes strokes snap to whole
     // pixels, appearing bolder/larger. Compensate by rendering ~17% larger (≈13px at 1×).
     // Equivalent to Blender at ui_scale≈1.17 or "Resolution Scale" ≈ 1.17 in Preferences.
-    if (!_font.load(Theme::FONT_SIZE_PT, 86.f, _content_scale)) {
+    if (!_font.load(Theme::FONT_SIZE_PT, 96.f, _content_scale)) {
         std::cerr << "[bl_ui] Font load failed\n"; return;
     }
 
@@ -124,6 +129,7 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     float sx = 1.f, sy = 1.f;
     glfwGetWindowContentScale(win, &sx, &sy);
     app->_content_scale = sx;
+    Theme::set_ui_scale(sx);
 }
 
 void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {

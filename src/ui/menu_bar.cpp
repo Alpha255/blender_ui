@@ -50,8 +50,20 @@ void MenuBar::draw(float vp_w, float vp_h) {
         bool hovered = (i == _hovered);
 
         if (active || hovered) {
-            _rb->draw_roundbox(item.x, 1.f, item.w, HEADER_H - 2.f,
-                               MENU_RADIUS, HEADER_HOVER);
+            // Blender: buttony = min(UI_UNIT_Y, header_h - 2), centered vertically.
+            // ED_region_header_layout: co.y = (header_h - buttony) / 2.
+            float hy = (HEADER_H - ITEM_HEIGHT) * 0.5f;
+            if (active) {
+                // Blender widget_roundbox_set: when popup opens below (UI_DIR_DOWN),
+                // remove bottom corners so the button visually connects to the popup.
+                // ~(CNR_BOTTOM_RIGHT | CNR_BOTTOM_LEFT) → only top corners rounded.
+                _rb->draw_roundbox(item.x, hy, item.w, ITEM_HEIGHT,
+                                   MENU_RADIUS, MENU_RADIUS, 0.f, 0.f,
+                                   HEADER_HOVER);
+            } else {
+                _rb->draw_roundbox(item.x, hy, item.w, ITEM_HEIGHT,
+                                   MENU_RADIUS, HEADER_HOVER);
+            }
         }
 
         RGBA tc = (active || hovered) ? ITEM_TEXT_SEL : HEADER_TEXT;

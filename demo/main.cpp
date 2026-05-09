@@ -35,23 +35,23 @@ static void register_menus(MenuRegistry& reg) {
 
     // ------ File ------
     reg.add(make_menu("TOPBAR_MT_file", "File", [](const Context&, Menu& m) {
-        m.layout.operator_("wm.read_homefile",    "New",              ICON_FILE_NEW,  "Ctrl N");
-        m.layout.operator_("wm.open_mainfile",    "Open...",          ICON_FILEBROWSER,"Ctrl O");
-        m.layout.operator_("wm.recover_auto_save","Recover Auto Save...");
+        m.layout.operator_("wm.read_homefile",    "New",              ICON_FILE_NEW,   "Ctrl N").mnemonic = 'N';
+        m.layout.operator_("wm.open_mainfile",    "Open...",          ICON_FILEBROWSER,"Ctrl O").mnemonic = 'O';
+        m.layout.operator_("wm.recover_auto_save","Recover Auto Save...").mnemonic = 'R';
         m.layout.separator();
-        m.layout.operator_("wm.save_mainfile",    "Save",             0,              "Ctrl S");
-        m.layout.operator_("wm.save_as_mainfile", "Save As...",       0,              "Ctrl Shift S");
-        m.layout.operator_("wm.save_as_mainfile", "Save Copy...");
+        m.layout.operator_("wm.save_mainfile",    "Save",             0,               "Ctrl S").mnemonic = 'S';
+        m.layout.operator_("wm.save_as_mainfile", "Save As...",       0,               "Ctrl Shift S").mnemonic = 'A';
+        m.layout.operator_("wm.save_as_mainfile", "Save Copy...").mnemonic = 'C';
         m.layout.separator();
-        m.layout.menu("TOPBAR_MT_file_import",    "Import",           ICON_IMPORT);
-        m.layout.menu("TOPBAR_MT_file_export",    "Export",           ICON_EXPORT);
+        m.layout.menu("TOPBAR_MT_file_import",    "Import",           ICON_IMPORT).mnemonic = 'I';
+        m.layout.menu("TOPBAR_MT_file_export",    "Export",           ICON_EXPORT).mnemonic = 'E';
         m.layout.separator();
-        m.layout.operator_("wm.link",             "Link...");
-        m.layout.operator_("wm.append",           "Append...");
+        m.layout.operator_("wm.link",             "Link...").mnemonic = 'L';
+        m.layout.operator_("wm.append",           "Append...").mnemonic = 'p';
         m.layout.separator();
-        m.layout.menu("TOPBAR_MT_file_external_data", "External Data",ICON_FILE_FOLDER);
+        m.layout.menu("TOPBAR_MT_file_external_data", "External Data",ICON_FILE_FOLDER).mnemonic = 'x';
         m.layout.separator();
-        m.layout.operator_("wm.quit_blender",     "Quit",             ICON_QUIT,      "Ctrl Q");
+        m.layout.operator_("wm.quit_blender",     "Quit",             ICON_QUIT,       "Ctrl Q").mnemonic = 'Q';
     }));
 
     // File submenus
@@ -84,20 +84,20 @@ static void register_menus(MenuRegistry& reg) {
 
     // ------ Edit ------
     reg.add(make_menu("TOPBAR_MT_edit", "Edit", [](const Context&, Menu& m) {
-        m.layout.operator_("ed.undo",              "Undo",                    0, "Ctrl Z");
-        m.layout.operator_("ed.redo",              "Redo",                    0, "Ctrl Shift Z");
-        m.layout.operator_("ed.undo_history",      "Undo History...");
+        m.layout.operator_("ed.undo",              "Undo",                    0, "Ctrl Z").mnemonic = 'U';
+        m.layout.operator_("ed.redo",              "Redo",                    0, "Ctrl Shift Z").mnemonic = 'R';
+        m.layout.operator_("ed.undo_history",      "Undo History...").mnemonic = 'H';
         m.layout.separator();
-        m.layout.operator_("screen.repeat_last",   "Repeat Last",             0, "Shift R");
-        m.layout.operator_("screen.repeat_history","Repeat History...");
+        m.layout.operator_("screen.repeat_last",   "Repeat Last",             0, "Shift R").mnemonic = 'e';
+        m.layout.operator_("screen.repeat_history","Repeat History...").mnemonic = 'p';
         m.layout.separator();
-        m.layout.operator_("screen.redo_last",     "Adjust Last Operation",   0, "F9");
+        m.layout.operator_("screen.redo_last",     "Adjust Last Operation",   0, "F9").mnemonic = 'A';
         m.layout.separator();
-        m.layout.menu("TOPBAR_MT_edit_menu_item",  "Menu Search");
+        m.layout.menu("TOPBAR_MT_edit_menu_item",  "Menu Search").mnemonic = 'M';
         m.layout.separator();
-        m.layout.operator_("wm.operator_defaults", "Operator Defaults");
+        m.layout.operator_("wm.operator_defaults", "Operator Defaults").mnemonic = 'O';
         m.layout.separator();
-        m.layout.operator_("wm.open_preferences",  "Preferences...");
+        m.layout.operator_("wm.open_preferences",  "Preferences...").mnemonic = 'f';
     }));
 
     reg.add(make_menu("TOPBAR_MT_edit_menu_item", "Menu Search", [](const Context&, Menu& m) {

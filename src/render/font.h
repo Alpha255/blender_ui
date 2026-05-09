@@ -36,6 +36,9 @@ public:
     // Line height (ascent + descent + line gap).
     float line_height() const { return _line_h; }
 
+    // Distance from the top of the bounding box to the text baseline, in logical px.
+    float ascent() const { return _ascent / _content_scale; }
+
     bool ready() const { return _prog != 0 && _atlas != 0; }
 
     // Must be called whenever the logical (window) viewport size changes.
@@ -78,9 +81,10 @@ private:
     int   _atlas_h        = 512;
 
     // Uniform locations
-    GLint _u_proj    = -1;
-    GLint _u_tex     = -1;
-    GLint _u_color   = -1;
+    GLint _u_proj       = -1;
+    GLint _u_tex        = -1;
+    GLint _u_color      = -1;
+    GLint _u_atlas_size = -1;  // ivec2 — atlas dimensions for manual bilinear bounds
 };
 
 } // namespace bl_ui

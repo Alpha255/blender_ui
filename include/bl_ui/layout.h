@@ -17,6 +17,7 @@ struct OperatorItem {
     std::string text;
     std::string shortcut;      // keyboard shortcut hint (right-aligned, dimmed)
     int         icon_id = 0;   // bl_ui::BLIcon value; 0 = no icon
+    char        mnemonic = 0;  // letter to underline (access key); 0 = none
     std::unordered_map<std::string, std::string> props;
 };
 
@@ -24,6 +25,7 @@ struct MenuRefItem {
     std::string menu_idname;
     std::string text;
     int         icon_id = 0;   // bl_ui::BLIcon value; 0 = no icon
+    char        mnemonic = 0;  // letter to underline (access key); 0 = none
 };
 
 struct SeparatorItem {};
