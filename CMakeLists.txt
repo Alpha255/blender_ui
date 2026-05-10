@@ -72,6 +72,7 @@ set(BL_UI_SOURCES
     src/ui/viewport.cpp
     src/ui/confirm_dialog.cpp
     src/ui/file_dialog.cpp
+    src/ui/about_dialog.cpp
     src/ui/app.cpp
 )
 

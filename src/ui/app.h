@@ -7,6 +7,7 @@
 #include "viewport.h"       // Viewport3D
 #include "confirm_dialog.h"
 #include "file_dialog.h"
+#include "about_dialog.h"
 #include <bl_ui/menu_type.h>
 #include <functional>
 #include <memory>
@@ -88,6 +89,7 @@ private:
     // Active blocking dialogs (nullptr when not open; only one open at a time).
     std::unique_ptr<ConfirmDialog> _confirm;
     std::unique_ptr<FileDialog>    _file_dialog;
+    std::unique_ptr<AboutDialog>   _about;
 
     // Internal operator dispatcher — intercepts built-in ops before forwarding.
     void _on_operator(const std::string& op);

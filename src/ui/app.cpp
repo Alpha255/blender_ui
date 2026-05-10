@@ -87,6 +87,7 @@ App::App(int width, int height, const char* title) {
         app->_viewport.set_viewport(float(w), float(h));
         if (app->_confirm)      app->_confirm->set_viewport(float(w), float(h));
         if (app->_file_dialog)  app->_file_dialog->set_viewport(float(w), float(h));
+        if (app->_about)        app->_about->set_viewport(float(w), float(h));
     });
 
     _ready = true;
@@ -116,6 +117,10 @@ void App::_on_operator(const std::string& op) {
     }
     if (op == "wm.open_mainfile") {
         _file_dialog = std::make_unique<FileDialog>(_vp_w, _vp_h, &_rb, &_font, &_icons);
+        return;
+    }
+    if (op == "wm.splash_about") {
+        _about = std::make_unique<AboutDialog>(_vp_w, _vp_h, &_rb, &_font, &_icons);
         return;
     }
     if (_op_cb) _op_cb(op);
@@ -152,6 +157,12 @@ void App::run() {
                 }
                 _file_dialog.reset();
             }
+        }
+
+        // About dialog (modal).
+        if (_about) {
+            _about->draw();
+            if (_about->is_closed()) _about.reset();
         }
 
         // Confirm dialog (modal — drawn on top of everything).
@@ -195,6 +206,7 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     app->_viewport.set_viewport(float(ww), float(wh));
     if (app->_confirm)      app->_confirm->set_viewport(float(ww), float(wh));
     if (app->_file_dialog)  app->_file_dialog->set_viewport(float(ww), float(wh));
+    if (app->_about)        app->_about->set_viewport(float(ww), float(wh));
     // Update content scale in case the window moved to a different monitor
     float sx = 1.f, sy = 1.f;
     glfwGetWindowContentScale(win, &sx, &sy);
@@ -207,6 +219,10 @@ void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
     if (!app) return;
     app->_mouse_x = float(x);
     app->_mouse_y = float(y);
+    if (app->_about) {
+        app->_about->handle_mouse(float(x), float(y), false, false);
+        return;
+    }
     if (app->_file_dialog) {
         app->_file_dialog->handle_mouse(float(x), float(y), false, false);
         return;
@@ -225,6 +241,13 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
     bool pressed  = (action == GLFW_PRESS);
     bool released = (action == GLFW_RELEASE);
     float mx = app->_mouse_x, my = app->_mouse_y;
+
+    // About dialog consumes all mouse input while open.
+    if (app->_about) {
+        if (btn == GLFW_MOUSE_BUTTON_LEFT)
+            app->_about->handle_mouse(mx, my, pressed, released);
+        return;
+    }
 
     // File dialog consumes all mouse input while open.
     if (app->_file_dialog) {
@@ -265,6 +288,10 @@ void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
 void App::_cb_key(GLFWwindow* win, int key, int /*sc*/, int action, int mods) {
     auto* app = get_app(win);
     if (!app || action == GLFW_RELEASE) return;
+    if (app->_about) {
+        app->_about->handle_key(key, mods);
+        return;
+    }
     if (app->_file_dialog) {
         app->_file_dialog->handle_key(key, mods);
         return;
