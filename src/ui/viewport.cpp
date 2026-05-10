@@ -41,14 +41,23 @@ void Viewport3D::_update_matrices() {
 
     float aspect = _vp_w / std::max(_vp_h, 1.f);
     Mat4 proj = Mat4::perspective(_fov_y, aspect, 0.01f, 50000.f);
-    Mat4 view = Mat4::look_at(_eye, _target, Vec3{0.f, 1.f, 0.f});
-    _view_proj = proj * view;
+    _view      = Mat4::look_at(_eye, _target, Vec3{0.f, 1.f, 0.f});
+    _view_proj = proj * _view;
     _view_proj.inverse(_inv_view_proj);
+}
+
+void Viewport3D::set_dependencies(Roundbox* rb, Font* font) {
+    _rb   = rb;
+    _font = font;
 }
 
 void Viewport3D::draw(float header_h) {
     _update_matrices();
     _grid.draw(_view_proj, _inv_view_proj, _eye, _distance, header_h);
+
+    if (_rb && _font) {
+        _gizmo.draw(_view, _vp_w, _vp_h, header_h, _rb, _font);
+    }
 }
 
 // ---------------------------------------------------------------------------

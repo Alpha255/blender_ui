@@ -1,6 +1,9 @@
 #pragma once
 #include "../render/grid.h"
 #include "../render/mat4.h"
+#include "../render/nav_gizmo.h"
+#include "../render/roundbox.h"
+#include "../render/font.h"
 
 namespace bl_ui {
 
@@ -26,6 +29,7 @@ public:
 
     bool init();
     void set_viewport(float w, float h);
+    void set_dependencies(Roundbox* rb, Font* font);
     void draw(float header_h);
 
     // GLFW event forwarding — called by App callbacks.
@@ -37,7 +41,10 @@ public:
 private:
     void _update_matrices();
 
-    Grid  _grid;
+    Grid      _grid;
+    NavGizmo  _gizmo;
+    Roundbox* _rb   = nullptr;
+    Font*     _font = nullptr;
     float _vp_w = 800.f, _vp_h = 600.f;
 
     // Orbit camera
@@ -48,6 +55,7 @@ private:
     float _fov_y     = 1.0472f;   // 60°
 
     // Cached per-frame matrices
+    Mat4  _view;
     Mat4  _view_proj;
     Mat4  _inv_view_proj;
     Vec3  _eye;

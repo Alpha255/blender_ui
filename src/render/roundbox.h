@@ -51,6 +51,10 @@ public:
     // (x,y) = top-left of bounding box; w,h = dimensions in logical pixels.
     void draw_triangle_right(float x, float y, float w, float h, RGBA color);
 
+    // Draw a thick line segment from (x0,y0) to (x1,y1) with given pixel width.
+    void draw_line_segment(float x0, float y0, float x1, float y1,
+                           float width, RGBA color);
+
 private:
     // Rounded-rect SDF shader
     GLuint _prog    = 0;

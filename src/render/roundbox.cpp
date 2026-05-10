@@ -151,7 +151,7 @@ bool Roundbox::init() {
     glGenBuffers(1, &_tri_vbo);
     glBindVertexArray(_tri_vao);
     glBindBuffer(GL_ARRAY_BUFFER, _tri_vbo);
-    glBufferData(GL_ARRAY_BUFFER, 3 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 6 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
@@ -222,6 +222,37 @@ void Roundbox::draw_triangle_right(float x, float y, float w, float h, RGBA colo
     glBindBuffer(GL_ARRAY_BUFFER, _tri_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+}
+
+void Roundbox::draw_line_segment(float x0, float y0, float x1, float y1,
+                                  float width, RGBA color)
+{
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 0.5f) return;
+
+    float hw = width * 0.5f;
+    float px = -dy / len * hw;  // perpendicular offset
+    float py =  dx / len * hw;
+
+    // Two triangles forming a quad
+    float verts[6][2] = {
+        {x0 + px, y0 + py}, {x0 - px, y0 - py}, {x1 + px, y1 + py},
+        {x0 - px, y0 - py}, {x1 - px, y1 - py}, {x1 + px, y1 + py},
+    };
+
+    glUseProgram(_tri_prog);
+    glUniform2f(_tri_u_vp,    _vp_w, _vp_h);
+    glUniform4f(_tri_u_color, color.rf(), color.gf(), color.bf(), color.af());
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glBindVertexArray(_tri_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, _tri_vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
 }
 

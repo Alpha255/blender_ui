@@ -6,8 +6,10 @@
 #include "menu_bar.h"
 #include "viewport.h"       // Viewport3D
 #include "confirm_dialog.h"
+#include "file_dialog.h"
 #include <bl_ui/menu_type.h>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace bl_ui {
@@ -52,6 +54,7 @@ private:
     static void _cb_mouse_button(GLFWwindow*, int btn, int action, int mods);
     static void _cb_cursor_pos  (GLFWwindow*, double x, double y);
     static void _cb_key         (GLFWwindow*, int key, int sc, int action, int mods);
+    static void _cb_char        (GLFWwindow*, unsigned int codepoint);
     static void _cb_framebuffer (GLFWwindow*, int w, int h);
     static void _cb_scroll      (GLFWwindow*, double dx, double dy);
 
@@ -82,8 +85,9 @@ private:
     std::function<void(const std::string&)>     _op_cb;
     std::function<void(float vp_w, float vp_h)> _viewport_draw;
 
-    // Active blocking dialog (nullptr when no dialog is open).
+    // Active blocking dialogs (nullptr when not open; only one open at a time).
     std::unique_ptr<ConfirmDialog> _confirm;
+    std::unique_ptr<FileDialog>    _file_dialog;
 
     // Internal operator dispatcher — intercepts built-in ops before forwarding.
     void _on_operator(const std::string& op);

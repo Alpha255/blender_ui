@@ -64,13 +64,15 @@ App::App(int width, int height, const char* title) {
     // (e.g. wm.quit_blender) before forwarding to the user-supplied callback.
     _bar.set_operator_callback([this](const std::string& op) { _on_operator(op); });
 
-    // Viewport: initialise size (camera defaults set in Viewport3D constructor).
+    // Viewport: initialise size and rendering dependencies.
     _viewport.set_viewport(_vp_w, _vp_h);
+    _viewport.set_dependencies(&_rb, &_font);
 
     glfwSetWindowUserPointer(_ctx.window(), this);
     glfwSetMouseButtonCallback(_ctx.window(), _cb_mouse_button);
     glfwSetCursorPosCallback  (_ctx.window(), _cb_cursor_pos);
     glfwSetKeyCallback        (_ctx.window(), _cb_key);
+    glfwSetCharCallback       (_ctx.window(), _cb_char);
     glfwSetScrollCallback     (_ctx.window(), _cb_scroll);
     glfwSetFramebufferSizeCallback(_ctx.window(), _cb_framebuffer);
     // Also listen for window resize to update logical size
@@ -83,7 +85,8 @@ App::App(int width, int height, const char* title) {
         app->_font.set_viewport(float(w), float(h));
         app->_icons.set_viewport(float(w), float(h));
         app->_viewport.set_viewport(float(w), float(h));
-        if (app->_confirm) app->_confirm->set_viewport(float(w), float(h));
+        if (app->_confirm)      app->_confirm->set_viewport(float(w), float(h));
+        if (app->_file_dialog)  app->_file_dialog->set_viewport(float(w), float(h));
     });
 
     _ready = true;
@@ -111,6 +114,10 @@ void App::_on_operator(const std::string& op) {
         );
         return;
     }
+    if (op == "wm.open_mainfile") {
+        _file_dialog = std::make_unique<FileDialog>(_vp_w, _vp_h, &_rb, &_font, &_icons);
+        return;
+    }
     if (_op_cb) _op_cb(op);
 }
 
@@ -135,6 +142,17 @@ void App::run() {
 
         // Menu bar uses logical coordinate system (_vp_w, _vp_h).
         _bar.draw(_vp_w, _vp_h);
+
+        // File dialog (full-screen, modal — drawn on top of viewport/bar).
+        if (_file_dialog) {
+            _file_dialog->draw();
+            if (_file_dialog->is_closed()) {
+                if (_file_dialog->is_confirmed() && _op_cb) {
+                    _op_cb("wm.open_mainfile:" + _file_dialog->result_path());
+                }
+                _file_dialog.reset();
+            }
+        }
 
         // Confirm dialog (modal — drawn on top of everything).
         if (_confirm) {
@@ -175,7 +193,8 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     app->_font.set_viewport(float(ww), float(wh));
     app->_icons.set_viewport(float(ww), float(wh));
     app->_viewport.set_viewport(float(ww), float(wh));
-    if (app->_confirm) app->_confirm->set_viewport(float(ww), float(wh));
+    if (app->_confirm)      app->_confirm->set_viewport(float(ww), float(wh));
+    if (app->_file_dialog)  app->_file_dialog->set_viewport(float(ww), float(wh));
     // Update content scale in case the window moved to a different monitor
     float sx = 1.f, sy = 1.f;
     glfwGetWindowContentScale(win, &sx, &sy);
@@ -188,6 +207,10 @@ void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
     if (!app) return;
     app->_mouse_x = float(x);
     app->_mouse_y = float(y);
+    if (app->_file_dialog) {
+        app->_file_dialog->handle_mouse(float(x), float(y), false, false);
+        return;
+    }
     if (app->_confirm) {
         app->_confirm->handle_mouse(float(x), float(y), false, false);
         return;
@@ -202,6 +225,13 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
     bool pressed  = (action == GLFW_PRESS);
     bool released = (action == GLFW_RELEASE);
     float mx = app->_mouse_x, my = app->_mouse_y;
+
+    // File dialog consumes all mouse input while open.
+    if (app->_file_dialog) {
+        if (btn == GLFW_MOUSE_BUTTON_LEFT)
+            app->_file_dialog->handle_mouse(mx, my, pressed, released);
+        return;
+    }
 
     // Confirm dialog consumes all mouse input while open.
     if (app->_confirm) {
@@ -221,7 +251,12 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
 
 void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
     auto* app = get_app(win);
-    if (!app || app->_confirm) return;
+    if (!app) return;
+    if (app->_file_dialog) {
+        app->_file_dialog->handle_scroll(float(dy));
+        return;
+    }
+    if (app->_confirm) return;
     if (app->_mouse_y > Theme::HEADER_H && !app->_bar.has_open_popup()) {
         app->_viewport.handle_scroll(app->_mouse_x, app->_mouse_y, float(dy));
     }
@@ -230,11 +265,22 @@ void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
 void App::_cb_key(GLFWwindow* win, int key, int /*sc*/, int action, int mods) {
     auto* app = get_app(win);
     if (!app || action == GLFW_RELEASE) return;
+    if (app->_file_dialog) {
+        app->_file_dialog->handle_key(key, mods);
+        return;
+    }
     if (app->_confirm) {
         app->_confirm->handle_key(key, mods);
         return;
     }
     app->_bar.handle_key(key, mods);
+}
+
+void App::_cb_char(GLFWwindow* win, unsigned int codepoint) {
+    auto* app = get_app(win);
+    if (!app) return;
+    if (app->_file_dialog)
+        app->_file_dialog->handle_char(codepoint);
 }
 
 } // namespace bl_ui
