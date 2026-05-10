@@ -38,6 +38,12 @@ enum BLIcon {
     // Help
     ICON_HELP            = 600,  // help.svg
     ICON_URL             = 601,  // url.svg
+
+    // Transform toolbar tools (custom SVGs, not in Blender's raster sheet)
+    ICON_TRANSFORM_MOVE   = 800,  // transform_move.svg
+    ICON_TRANSFORM_ROTATE = 801,  // transform_rotate.svg
+    ICON_TRANSFORM_SCALE  = 802,  // transform_scale.svg
+    ICON_TRANSFORM_ALL    = 803,  // transform_all.svg
 };
 
 } // namespace bl_ui

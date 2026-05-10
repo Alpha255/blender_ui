@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="1600" viewBox="0 0 1600 1600" width="1600" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Transform (all) — outer ring with CW arrowhead + inner move crosshair.
+    Ring: full circle r=560, stroke-width=145.
+    Arrowhead at 12-o'clock (top of ring) pointing clockwise (leftward in screen).
+    Inner crosshair: 4 small arrow triangles (N/E/S/W) at 40% scale.
+  -->
+  <!-- Outer ring -->
+  <circle cx="800" cy="800" r="560" fill="none" stroke="#fff" stroke-width="145"/>
+  <!-- Clockwise arrowhead at top (800,240) pointing left.
+       Back 140px to the right: base=(940,240).  Wings ±115px vertically. -->
+  <path d="M 800,240 L 940,355 L 940,125 Z" fill="#fff"/>
+  <!-- Inner N arrow (tip up) -->
+  <path d="M 755,788 L 755,658 L 688,658 L 800,510 L 912,658 L 845,658 L 845,788 Z" fill="#fff"/>
+  <!-- Inner S arrow (tip down) -->
+  <path d="M 755,812 L 755,942 L 688,942 L 800,1090 L 912,942 L 845,942 L 845,812 Z" fill="#fff"/>
+  <!-- Inner W arrow (tip left) -->
+  <path d="M 788,755 L 658,755 L 658,688 L 510,800 L 658,912 L 658,845 L 788,845 Z" fill="#fff"/>
+  <!-- Inner E arrow (tip right) -->
+  <path d="M 812,755 L 942,755 L 942,688 L 1090,800 L 942,912 L 942,845 L 812,845 Z" fill="#fff"/>
+</svg>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="1600" viewBox="0 0 1600 1600" width="1600" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Move / Grab tool — four cardinal arrows forming a cross.
+    Center (800,800).  Each arrow: arrowhead + shaft; shafts leave a 100-unit
+    gap at the centre so the icon reads as four distinct arrows.
+  -->
+  <g fill="#fff">
+    <!-- Up arrow   (tip at top)    -->
+    <path d="M 700,760 L 700,470 L 560,470 L 800,120 L 1040,470 L 900,470 L 900,760 Z"/>
+    <!-- Down arrow (tip at bottom) -->
+    <path d="M 700,840 L 700,1130 L 560,1130 L 800,1480 L 1040,1130 L 900,1130 L 900,840 Z"/>
+    <!-- Left arrow (tip at left)   -->
+    <path d="M 760,700 L 470,700 L 470,560 L 120,800 L 470,1040 L 470,900 L 760,900 Z"/>
+    <!-- Right arrow(tip at right)  -->
+    <path d="M 840,700 L 1130,700 L 1130,560 L 1480,800 L 1130,1040 L 1130,900 L 840,900 Z"/>
+  </g>
+</svg>

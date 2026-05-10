@@ -93,6 +93,10 @@ const char* IconAtlas::_svg_stem(int id) {
         case ICON_WINDOW:            return "window";
         case ICON_HELP:              return "help";
         case ICON_URL:               return "url";
+        case ICON_TRANSFORM_MOVE:   return "transform_move";
+        case ICON_TRANSFORM_ROTATE: return "transform_rotate";
+        case ICON_TRANSFORM_SCALE:  return "transform_scale";
+        case ICON_TRANSFORM_ALL:    return "transform_all";
         default:                     return nullptr;
     }
 }

@@ -8,6 +8,9 @@
 #include "confirm_dialog.h"
 #include "file_dialog.h"
 #include "about_dialog.h"
+#include "splash_screen.h"
+#include "toolbar.h"
+#include "scene_panel.h"
 #include <bl_ui/menu_type.h>
 #include <functional>
 #include <memory>
@@ -66,6 +69,8 @@ private:
     MenuRegistry _reg;
     MenuBar      _bar;
     Viewport3D   _viewport;
+    Toolbar      _toolbar;
+    ScenePanel   _scene_panel;
 
     bool  _ready   = false;
 
@@ -87,6 +92,7 @@ private:
     std::function<void(float vp_w, float vp_h)> _viewport_draw;
 
     // Active blocking dialogs (nullptr when not open; only one open at a time).
+    std::unique_ptr<SplashScreen>  _splash;
     std::unique_ptr<ConfirmDialog> _confirm;
     std::unique_ptr<FileDialog>    _file_dialog;
     std::unique_ptr<AboutDialog>   _about;

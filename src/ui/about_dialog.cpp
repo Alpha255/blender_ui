@@ -29,7 +29,7 @@ static const char* BUILD_DATE  = "2026-05-10";
 static const char* BUILD_HASH  = "\xe2\x80\x94 (development build)";  // —
 static const char* BUILD_BRANCH= "main";
 // © U+00A9 encoded as UTF-8: 0xC2 0xA9
-static const char* COPYRIGHT   = R"(\xc2\xa9 2024\xe2\x80\x932026  blender_ui contributors)";
+static const char* COPYRIGHT   = "\xc2\xa9 2024\xe2\x80\x93" "2026  blender_ui contributors";
 static const char* LICENSE     = "Licensed under the GNU General Public License v3";
 static const char* BASED_ON    = "Based on the Blender open-source project \xe2\x80\x94 blender.org";
 

@@ -73,6 +73,9 @@ set(BL_UI_SOURCES
     src/ui/confirm_dialog.cpp
     src/ui/file_dialog.cpp
     src/ui/about_dialog.cpp
+    src/ui/splash_screen.cpp
+    src/ui/toolbar.cpp
+    src/ui/scene_panel.cpp
     src/ui/app.cpp
 )
 

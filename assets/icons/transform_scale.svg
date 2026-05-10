@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="1600" viewBox="0 0 1600 1600" width="1600" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Scale tool — four diagonal arrows expanding outward from centre (800,800).
+    d = unit direction toward tip, p = CCW perpendicular = (-dy, dx).
+    L=150 (inner), S=110 (shaft half-w), H=430 (arrowbase), A=220 (head half-w), T=700 (tip).
+    Polygon: inner_L → base_shaft_L → base_wide_L → tip → base_wide_R → base_shaft_R → inner_R → Z
+    All coords = 800 + parameter * component.
+
+    NE: d=(+0.707,-0.707), p=(+0.707,+0.707)
+    NW: d=(-0.707,-0.707), p=(+0.707,-0.707)
+    SW: d=(-0.707,+0.707), p=(-0.707,-0.707)
+    SE: d=(+0.707,+0.707), p=(-0.707,+0.707)
+  -->
+  <g fill="#fff">
+    <!-- NE -->
+    <path d="M 984,772 L 1182,574 L 1260,652 L 1295,305 L 948,340 L 1026,418 L 828,616 Z"/>
+    <!-- NW -->
+    <path d="M 772,616 L 574,418 L 652,340 L 305,305 L 340,652 L 418,574 L 616,772 Z"/>
+    <!-- SW -->
+    <path d="M 616,828 L 418,1026 L 340,948 L 305,1295 L 652,1260 L 574,1182 L 772,984 Z"/>
+    <!-- SE -->
+    <path d="M 828,984 L 1026,1182 L 948,1260 L 1295,1295 L 1260,948 L 1182,1026 L 984,828 Z"/>
+  </g>
+</svg>

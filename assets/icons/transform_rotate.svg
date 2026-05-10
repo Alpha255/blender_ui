@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="1600" viewBox="0 0 1600 1600" width="1600" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Rotate tool — clockwise arc (~270°) with an arrowhead at the leading end.
+    Arc: centre (800,800), radius 550, from 60° to 330° clockwise.
+    At SVG convention (y-down, angles clockwise from +x):
+      60°  → start: (800+275, 800+476) = (1075, 1276)
+      330° → end:   (800+476, 800-275) = (1276, 525)
+    CW tangent at 330°: (-sin330°, cos330°) = (0.5, 0.866)
+    Arrowhead tip at end, pointing in travel direction.
+  -->
+  <!-- Arc (thick stroke, no fill) -->
+  <path d="M 1075,1276 A 550,550 0 1 1 1276,525"
+        fill="none" stroke="#fff" stroke-width="170" stroke-linecap="round"/>
+  <!-- Arrowhead at 330° end, pointing clockwise (toward lower-right).
+       Base 240px back along (-0.5,-0.866) from tip (1276,525):
+         base = (1276-120, 525-208) = (1156, 317)
+       Perp (CCW of tangent = (-0.866, 0.5)):
+         wing1 = base + 190*(-0.866, 0.5) = (1156-164, 317+95) = (992, 412)
+         wing2 = base - 190*(-0.866, 0.5) = (1156+164, 317-95) = (1320, 222)
+  -->
+  <path d="M 1276,525 L 992,412 L 1320,222 Z" fill="#fff"/>
+</svg>

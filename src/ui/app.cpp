@@ -85,10 +85,22 @@ App::App(int width, int height, const char* title) {
         app->_font.set_viewport(float(w), float(h));
         app->_icons.set_viewport(float(w), float(h));
         app->_viewport.set_viewport(float(w), float(h));
+        app->_toolbar.set_viewport(float(w), float(h));
+        app->_scene_panel.set_viewport(float(w), float(h));
+        if (app->_splash)       app->_splash->set_viewport(float(w), float(h));
         if (app->_confirm)      app->_confirm->set_viewport(float(w), float(h));
         if (app->_file_dialog)  app->_file_dialog->set_viewport(float(w), float(h));
         if (app->_about)        app->_about->set_viewport(float(w), float(h));
     });
+
+    _toolbar.set_viewport(_vp_w, _vp_h);
+    _toolbar.set_icons(&_icons);
+
+    _scene_panel.set_viewport(_vp_w, _vp_h);
+    _scene_panel.set_dependencies(&_rb, &_font);
+
+    // Show splash screen on startup.
+    _splash = std::make_unique<SplashScreen>(_vp_w, _vp_h, &_rb, &_font, &_icons);
 
     _ready = true;
 }
@@ -123,6 +135,10 @@ void App::_on_operator(const std::string& op) {
         _about = std::make_unique<AboutDialog>(_vp_w, _vp_h, &_rb, &_font, &_icons);
         return;
     }
+    if (op == "wm.splash") {
+        _splash = std::make_unique<SplashScreen>(_vp_w, _vp_h, &_rb, &_font, &_icons);
+        return;
+    }
     if (_op_cb) _op_cb(op);
 }
 
@@ -145,6 +161,12 @@ void App::run() {
         // Optional custom overlay drawn on top of the grid.
         if (_viewport_draw) _viewport_draw(_vp_w, _vp_h);
 
+        // Left-side toolbar (floating overlay below the menu bar).
+        _toolbar.draw(Theme::HEADER_H, &_rb, &_font);
+
+        // Right-side scene collection panel (floating overlay).
+        _scene_panel.draw(Theme::HEADER_H);
+
         // Menu bar uses logical coordinate system (_vp_w, _vp_h).
         _bar.draw(_vp_w, _vp_h);
 
@@ -163,6 +185,17 @@ void App::run() {
         if (_about) {
             _about->draw();
             if (_about->is_closed()) _about.reset();
+        }
+
+        // Splash screen (topmost modal — drawn above everything else).
+        if (_splash) {
+            _splash->draw();
+            if (_splash->is_closed()) {
+                if (_splash->wants_open_file()) {
+                    _file_dialog = std::make_unique<FileDialog>(_vp_w, _vp_h, &_rb, &_font, &_icons);
+                }
+                _splash.reset();
+            }
         }
 
         // Confirm dialog (modal — drawn on top of everything).
@@ -204,6 +237,9 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     app->_font.set_viewport(float(ww), float(wh));
     app->_icons.set_viewport(float(ww), float(wh));
     app->_viewport.set_viewport(float(ww), float(wh));
+    app->_toolbar.set_viewport(float(ww), float(wh));
+    app->_scene_panel.set_viewport(float(ww), float(wh));
+    if (app->_splash)       app->_splash->set_viewport(float(ww), float(wh));
     if (app->_confirm)      app->_confirm->set_viewport(float(ww), float(wh));
     if (app->_file_dialog)  app->_file_dialog->set_viewport(float(ww), float(wh));
     if (app->_about)        app->_about->set_viewport(float(ww), float(wh));
@@ -219,6 +255,10 @@ void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
     if (!app) return;
     app->_mouse_x = float(x);
     app->_mouse_y = float(y);
+    if (app->_splash) {
+        app->_splash->handle_mouse(float(x), float(y), false, false);
+        return;
+    }
     if (app->_about) {
         app->_about->handle_mouse(float(x), float(y), false, false);
         return;
@@ -231,6 +271,8 @@ void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
         app->_confirm->handle_mouse(float(x), float(y), false, false);
         return;
     }
+    app->_toolbar.handle_mouse(float(x), float(y), false, false);
+    app->_scene_panel.handle_mouse(float(x), float(y), false, false);
     app->_bar.handle_mouse_move(float(x), float(y));
     app->_viewport.handle_mouse_move(float(x), float(y));
 }
@@ -241,6 +283,13 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
     bool pressed  = (action == GLFW_PRESS);
     bool released = (action == GLFW_RELEASE);
     float mx = app->_mouse_x, my = app->_mouse_y;
+
+    // Splash screen consumes all mouse input while open.
+    if (app->_splash) {
+        if (btn == GLFW_MOUSE_BUTTON_LEFT)
+            app->_splash->handle_mouse(mx, my, pressed, released);
+        return;
+    }
 
     // About dialog consumes all mouse input while open.
     if (app->_about) {
@@ -264,6 +313,10 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
     }
 
     if (btn == GLFW_MOUSE_BUTTON_LEFT) {
+        // Toolbar: consumes clicks when the cursor is over the panel.
+        if (app->_toolbar.handle_mouse(mx, my, pressed, released)) return;
+        // Scene panel: consumes clicks when cursor is inside the panel.
+        if (app->_scene_panel.handle_mouse(mx, my, pressed, released)) return;
         app->_bar.handle_mouse_button(mx, my, pressed, released);
     } else if (btn == GLFW_MOUSE_BUTTON_MIDDLE) {
         if (my > Theme::HEADER_H) {
@@ -275,19 +328,28 @@ void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
 void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
     auto* app = get_app(win);
     if (!app) return;
+    if (app->_splash) return;
     if (app->_file_dialog) {
         app->_file_dialog->handle_scroll(float(dy));
         return;
     }
     if (app->_confirm) return;
     if (app->_mouse_y > Theme::HEADER_H && !app->_bar.has_open_popup()) {
-        app->_viewport.handle_scroll(app->_mouse_x, app->_mouse_y, float(dy));
+        if (app->_mouse_x >= app->_scene_panel.panel_left()) {
+            app->_scene_panel.handle_scroll(float(dy));
+        } else {
+            app->_viewport.handle_scroll(app->_mouse_x, app->_mouse_y, float(dy));
+        }
     }
 }
 
 void App::_cb_key(GLFWwindow* win, int key, int /*sc*/, int action, int mods) {
     auto* app = get_app(win);
     if (!app || action == GLFW_RELEASE) return;
+    if (app->_splash) {
+        app->_splash->handle_key(key, mods);
+        return;
+    }
     if (app->_about) {
         app->_about->handle_key(key, mods);
         return;
