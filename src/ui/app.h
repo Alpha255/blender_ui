@@ -4,6 +4,7 @@
 #include "../render/font.h"
 #include "../render/icon_atlas.h"
 #include "menu_bar.h"
+#include "viewport.h"
 #include <bl_ui/menu_type.h>
 #include <functional>
 #include <string>
@@ -29,14 +30,15 @@ public:
     // Main event loop.
     void run();
 
-    MenuBar&      menu_bar()  { return _bar; }
-    MenuRegistry& registry()  { return _reg; }
+    MenuBar&      menu_bar()  { return _bar;      }
+    MenuRegistry& registry()  { return _reg;      }
+    Viewport2D&   viewport()  { return _viewport; }
 
     // Called when an operator is activated from any menu.
     void set_operator_callback(std::function<void(const std::string&)> cb);
 
-    // Draw viewport background (called each frame before menu_bar.draw).
-    // Override by setting a custom draw callback.
+    // Optional extra draw callback executed each frame after the grid and
+    // before the menu bar, for custom overlay content in the viewport.
     void set_viewport_draw(std::function<void(float vp_w, float vp_h)> cb) {
         _viewport_draw = std::move(cb);
     }
@@ -50,6 +52,7 @@ private:
     static void _cb_cursor_pos  (GLFWwindow*, double x, double y);
     static void _cb_key         (GLFWwindow*, int key, int sc, int action, int mods);
     static void _cb_framebuffer (GLFWwindow*, int w, int h);
+    static void _cb_scroll      (GLFWwindow*, double dx, double dy);
 
     GLContext    _ctx;
     Roundbox     _rb;
@@ -57,6 +60,7 @@ private:
     IconAtlas    _icons;
     MenuRegistry _reg;
     MenuBar      _bar;
+    Viewport2D   _viewport;
 
     bool  _ready   = false;
 

@@ -65,8 +65,10 @@ set(BL_UI_SOURCES
     src/render/roundbox.cpp
     src/render/font.cpp
     src/render/icon_atlas.cpp
+    src/render/grid.cpp
     src/ui/popup_menu.cpp
     src/ui/menu_bar.cpp
+    src/ui/viewport.cpp
     src/ui/app.cpp
 )
 

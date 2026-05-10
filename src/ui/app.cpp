@@ -31,7 +31,8 @@ App::App(int width, int height, const char* title) {
     // Physical framebuffer size — only used for glViewport.
     _ctx.get_framebuffer_size(_fb_w, _fb_h);
 
-    if (!_rb.init()) { std::cerr << "[bl_ui] Roundbox init failed\n"; return; }
+    if (!_rb.init())       { std::cerr << "[bl_ui] Roundbox init failed\n";  return; }
+    if (!_viewport.init()) { std::cerr << "[bl_ui] Viewport init failed\n"; return; }
 
     // Blender formula: U.dpi = getDPIHint()*ui_scale*(72/96); scale_factor = U.dpi/72 = ui_scale
     // Font px = 11 * scale_factor.  At 100% Windows (ui_scale=1): 11px.
@@ -57,10 +58,16 @@ App::App(int width, int height, const char* title) {
     _font.set_viewport(_vp_w, _vp_h);
     _bar.set_dependencies(&_rb, &_font, &_reg, &_icons);
 
+    // Viewport: initialise size and centre the world origin in the viewport area.
+    _viewport.set_viewport(_vp_w, _vp_h);
+    _viewport.set_pan(_vp_w * 0.5f,
+                      Theme::HEADER_H + (_vp_h - Theme::HEADER_H) * 0.5f);
+
     glfwSetWindowUserPointer(_ctx.window(), this);
     glfwSetMouseButtonCallback(_ctx.window(), _cb_mouse_button);
     glfwSetCursorPosCallback  (_ctx.window(), _cb_cursor_pos);
     glfwSetKeyCallback        (_ctx.window(), _cb_key);
+    glfwSetScrollCallback     (_ctx.window(), _cb_scroll);
     glfwSetFramebufferSizeCallback(_ctx.window(), _cb_framebuffer);
     // Also listen for window resize to update logical size
     glfwSetWindowSizeCallback(_ctx.window(), [](GLFWwindow* win, int w, int h) {
@@ -71,6 +78,7 @@ App::App(int width, int height, const char* title) {
         app->_rb.set_viewport(float(w), float(h));
         app->_font.set_viewport(float(w), float(h));
         app->_icons.set_viewport(float(w), float(h));
+        app->_viewport.set_viewport(float(w), float(h));
     });
 
     _ready = true;
@@ -94,6 +102,10 @@ void App::run() {
         glClearColor(bg.rf(), bg.gf(), bg.bf(), 1.f);
         glClear(GL_COLOR_BUFFER_BIT);
 
+        // Viewport grid (below the menu bar).
+        _viewport.draw(Theme::HEADER_H);
+
+        // Optional custom overlay drawn on top of the grid.
         if (_viewport_draw) _viewport_draw(_vp_w, _vp_h);
 
         // Menu bar uses logical coordinate system (_vp_w, _vp_h).
@@ -125,6 +137,7 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     app->_rb.set_viewport(float(ww), float(wh));
     app->_font.set_viewport(float(ww), float(wh));
     app->_icons.set_viewport(float(ww), float(wh));
+    app->_viewport.set_viewport(float(ww), float(wh));
     // Update content scale in case the window moved to a different monitor
     float sx = 1.f, sy = 1.f;
     glfwGetWindowContentScale(win, &sx, &sy);
@@ -139,14 +152,38 @@ void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
     app->_mouse_x = float(x);
     app->_mouse_y = float(y);
     app->_bar.handle_mouse_move(float(x), float(y));
+    app->_viewport.handle_mouse_move(float(x), float(y));
 }
 
 void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int /*mods*/) {
     auto* app = get_app(win);
-    if (!app || btn != GLFW_MOUSE_BUTTON_LEFT) return;
+    if (!app) return;
     bool pressed  = (action == GLFW_PRESS);
     bool released = (action == GLFW_RELEASE);
-    app->_bar.handle_mouse_button(app->_mouse_x, app->_mouse_y, pressed, released);
+    float mx = app->_mouse_x, my = app->_mouse_y;
+
+    if (btn == GLFW_MOUSE_BUTTON_LEFT) {
+        // Menu bar handles all left-clicks (including popup close-on-click-outside).
+        bool popup_open = app->_bar.has_open_popup();
+        app->_bar.handle_mouse_button(mx, my, pressed, released);
+        // Start viewport pan with left-mouse only when no popup was open and the
+        // cursor is in the viewport area (below the header bar).
+        if (!popup_open && my > Theme::HEADER_H) {
+            app->_viewport.handle_mouse_button(mx, my, pressed, released, btn);
+        }
+    } else if (btn == GLFW_MOUSE_BUTTON_MIDDLE) {
+        // Middle mouse always pans the viewport (standard Blender convention).
+        app->_viewport.handle_mouse_button(mx, my, pressed, released, btn);
+    }
+}
+
+void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
+    auto* app = get_app(win);
+    if (!app) return;
+    // Only zoom viewport when the cursor is in the viewport area and no popup is open.
+    if (app->_mouse_y > Theme::HEADER_H && !app->_bar.has_open_popup()) {
+        app->_viewport.handle_scroll(app->_mouse_x, app->_mouse_y, float(dy));
+    }
 }
 
 void App::_cb_key(GLFWwindow* win, int key, int /*sc*/, int action, int mods) {

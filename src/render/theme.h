@@ -57,6 +57,15 @@ constexpr RGBA SEP_COLOR    {0x3D, 0x3D, 0x3D, 0xFF};
 // Viewport / background
 constexpr RGBA VIEWPORT_BG  {0x39, 0x39, 0x39, 0xFF};
 
+// 2D viewport grid overlay
+// Minor lines are slightly lighter than VIEWPORT_BG.
+// Major lines (every 5 minor) are more prominent.
+// Axis lines highlight world y=0 (horizontal) and world x=0 (vertical).
+constexpr RGBA GRID_LINE       {0x45, 0x45, 0x45, 0xFF};
+constexpr RGBA GRID_LINE_MAJOR {0x55, 0x55, 0x55, 0xFF};
+constexpr RGBA GRID_AXIS_X     {0x7A, 0x24, 0x24, 0xFF}; // world y=0 horizontal line
+constexpr RGBA GRID_AXIS_Y     {0x24, 0x5E, 0x1A, 0xFF}; // world x=0 vertical line
+
 // Font size (points — DPI scaling handled separately in Font::load)
 constexpr float FONT_SIZE_PT = 13.f;
 
