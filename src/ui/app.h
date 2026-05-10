@@ -4,7 +4,8 @@
 #include "../render/font.h"
 #include "../render/icon_atlas.h"
 #include "menu_bar.h"
-#include "viewport.h"
+#include "viewport.h"       // Viewport3D
+#include "confirm_dialog.h"
 #include <bl_ui/menu_type.h>
 #include <functional>
 #include <string>
@@ -32,7 +33,7 @@ public:
 
     MenuBar&      menu_bar()  { return _bar;      }
     MenuRegistry& registry()  { return _reg;      }
-    Viewport2D&   viewport()  { return _viewport; }
+    Viewport3D&   viewport()  { return _viewport; }
 
     // Called when an operator is activated from any menu.
     void set_operator_callback(std::function<void(const std::string&)> cb);
@@ -60,7 +61,7 @@ private:
     IconAtlas    _icons;
     MenuRegistry _reg;
     MenuBar      _bar;
-    Viewport2D   _viewport;
+    Viewport3D   _viewport;
 
     bool  _ready   = false;
 
@@ -78,8 +79,14 @@ private:
     float _mouse_x = 0.f;
     float _mouse_y = 0.f;
 
-    std::function<void(const std::string&)>   _op_cb;
+    std::function<void(const std::string&)>     _op_cb;
     std::function<void(float vp_w, float vp_h)> _viewport_draw;
+
+    // Active blocking dialog (nullptr when no dialog is open).
+    std::unique_ptr<ConfirmDialog> _confirm;
+
+    // Internal operator dispatcher — intercepts built-in ops before forwarding.
+    void _on_operator(const std::string& op);
 };
 
 } // namespace bl_ui

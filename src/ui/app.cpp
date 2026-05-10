@@ -1,5 +1,7 @@
 #include "app.h"
 #include "../render/theme.h"
+#include "../render/icon_atlas.h"
+#include <bl_ui/icons.h>
 #include <iostream>
 
 namespace bl_ui {
@@ -31,8 +33,8 @@ App::App(int width, int height, const char* title) {
     // Physical framebuffer size — only used for glViewport.
     _ctx.get_framebuffer_size(_fb_w, _fb_h);
 
-    if (!_rb.init())       { std::cerr << "[bl_ui] Roundbox init failed\n";  return; }
-    if (!_viewport.init()) { std::cerr << "[bl_ui] Viewport init failed\n"; return; }
+    if (!_rb.init())       { std::cerr << "[bl_ui] Roundbox init failed\n";   return; }
+    if (!_viewport.init()) { std::cerr << "[bl_ui] Viewport3D init failed\n"; return; }
 
     // Blender formula: U.dpi = getDPIHint()*ui_scale*(72/96); scale_factor = U.dpi/72 = ui_scale
     // Font px = 11 * scale_factor.  At 100% Windows (ui_scale=1): 11px.
@@ -58,10 +60,12 @@ App::App(int width, int height, const char* title) {
     _font.set_viewport(_vp_w, _vp_h);
     _bar.set_dependencies(&_rb, &_font, &_reg, &_icons);
 
-    // Viewport: initialise size and centre the world origin in the viewport area.
+    // Install our internal dispatcher so the App can intercept built-in operators
+    // (e.g. wm.quit_blender) before forwarding to the user-supplied callback.
+    _bar.set_operator_callback([this](const std::string& op) { _on_operator(op); });
+
+    // Viewport: initialise size (camera defaults set in Viewport3D constructor).
     _viewport.set_viewport(_vp_w, _vp_h);
-    _viewport.set_pan(_vp_w * 0.5f,
-                      Theme::HEADER_H + (_vp_h - Theme::HEADER_H) * 0.5f);
 
     glfwSetWindowUserPointer(_ctx.window(), this);
     glfwSetMouseButtonCallback(_ctx.window(), _cb_mouse_button);
@@ -79,14 +83,35 @@ App::App(int width, int height, const char* title) {
         app->_font.set_viewport(float(w), float(h));
         app->_icons.set_viewport(float(w), float(h));
         app->_viewport.set_viewport(float(w), float(h));
+        if (app->_confirm) app->_confirm->set_viewport(float(w), float(h));
     });
 
     _ready = true;
 }
 
 void App::set_operator_callback(std::function<void(const std::string&)> cb) {
-    _op_cb = cb;
-    _bar.set_operator_callback(cb);
+    _op_cb = std::move(cb);
+    // Don't overwrite _bar's callback — it is already wired to _on_operator().
+}
+
+// Internal dispatcher — intercepts built-in operators, forwards the rest.
+void App::_on_operator(const std::string& op) {
+    if (op == "wm.quit_blender") {
+        // Blender: wm_quit_blender_invoke → WM_operator_confirm_message_ex
+        // "Quit Blender?", ICON_WARNING, WM_YES_NO → [Cancel] [Quit Blender]
+        _confirm = std::make_unique<ConfirmDialog>(
+            "Quit Blender?",
+            std::vector<ConfirmDialog::Button>{
+                {"Cancel",       true },
+                {"Quit Blender", false},
+            },
+            _vp_w, _vp_h,
+            &_rb, &_font, &_icons,
+            ICON_ERROR    // closest available to Blender's ICON_WARNING
+        );
+        return;
+    }
+    if (_op_cb) _op_cb(op);
 }
 
 void App::run() {
@@ -100,7 +125,7 @@ void App::run() {
 
         RGBA bg = Theme::VIEWPORT_BG;
         glClearColor(bg.rf(), bg.gf(), bg.bf(), 1.f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Viewport grid (below the menu bar).
         _viewport.draw(Theme::HEADER_H);
@@ -110,6 +135,18 @@ void App::run() {
 
         // Menu bar uses logical coordinate system (_vp_w, _vp_h).
         _bar.draw(_vp_w, _vp_h);
+
+        // Confirm dialog (modal — drawn on top of everything).
+        if (_confirm) {
+            _confirm->draw();
+            if (_confirm->is_closed()) {
+                if (_confirm->result() >= 1) {
+                    // index 1 = "Quit Blender" (the confirm button)
+                    glfwSetWindowShouldClose(_ctx.window(), GLFW_TRUE);
+                }
+                _confirm.reset();
+            }
+        }
 
         _ctx.swap_buffers();
     }
@@ -138,6 +175,7 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
     app->_font.set_viewport(float(ww), float(wh));
     app->_icons.set_viewport(float(ww), float(wh));
     app->_viewport.set_viewport(float(ww), float(wh));
+    if (app->_confirm) app->_confirm->set_viewport(float(ww), float(wh));
     // Update content scale in case the window moved to a different monitor
     float sx = 1.f, sy = 1.f;
     glfwGetWindowContentScale(win, &sx, &sy);
@@ -148,39 +186,42 @@ void App::_cb_framebuffer(GLFWwindow* win, int w, int h) {
 void App::_cb_cursor_pos(GLFWwindow* win, double x, double y) {
     auto* app = get_app(win);
     if (!app) return;
-    // GLFW cursor pos is already in logical (window) pixels — no scaling needed.
     app->_mouse_x = float(x);
     app->_mouse_y = float(y);
+    if (app->_confirm) {
+        app->_confirm->handle_mouse(float(x), float(y), false, false);
+        return;
+    }
     app->_bar.handle_mouse_move(float(x), float(y));
     app->_viewport.handle_mouse_move(float(x), float(y));
 }
 
-void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int /*mods*/) {
+void App::_cb_mouse_button(GLFWwindow* win, int btn, int action, int mods) {
     auto* app = get_app(win);
     if (!app) return;
     bool pressed  = (action == GLFW_PRESS);
     bool released = (action == GLFW_RELEASE);
     float mx = app->_mouse_x, my = app->_mouse_y;
 
+    // Confirm dialog consumes all mouse input while open.
+    if (app->_confirm) {
+        if (btn == GLFW_MOUSE_BUTTON_LEFT)
+            app->_confirm->handle_mouse(mx, my, pressed, released);
+        return;
+    }
+
     if (btn == GLFW_MOUSE_BUTTON_LEFT) {
-        // Menu bar handles all left-clicks (including popup close-on-click-outside).
-        bool popup_open = app->_bar.has_open_popup();
         app->_bar.handle_mouse_button(mx, my, pressed, released);
-        // Start viewport pan with left-mouse only when no popup was open and the
-        // cursor is in the viewport area (below the header bar).
-        if (!popup_open && my > Theme::HEADER_H) {
-            app->_viewport.handle_mouse_button(mx, my, pressed, released, btn);
-        }
     } else if (btn == GLFW_MOUSE_BUTTON_MIDDLE) {
-        // Middle mouse always pans the viewport (standard Blender convention).
-        app->_viewport.handle_mouse_button(mx, my, pressed, released, btn);
+        if (my > Theme::HEADER_H) {
+            app->_viewport.handle_mouse_button(mx, my, pressed, released, btn, mods);
+        }
     }
 }
 
 void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
     auto* app = get_app(win);
-    if (!app) return;
-    // Only zoom viewport when the cursor is in the viewport area and no popup is open.
+    if (!app || app->_confirm) return;
     if (app->_mouse_y > Theme::HEADER_H && !app->_bar.has_open_popup()) {
         app->_viewport.handle_scroll(app->_mouse_x, app->_mouse_y, float(dy));
     }
@@ -189,6 +230,10 @@ void App::_cb_scroll(GLFWwindow* win, double /*dx*/, double dy) {
 void App::_cb_key(GLFWwindow* win, int key, int /*sc*/, int action, int mods) {
     auto* app = get_app(win);
     if (!app || action == GLFW_RELEASE) return;
+    if (app->_confirm) {
+        app->_confirm->handle_key(key, mods);
+        return;
+    }
     app->_bar.handle_key(key, mods);
 }
 

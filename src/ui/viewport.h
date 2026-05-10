@@ -1,59 +1,66 @@
 #pragma once
 #include "../render/grid.h"
+#include "../render/mat4.h"
 
 namespace bl_ui {
 
 // ---------------------------------------------------------------------------
-// Viewport2D — pannable, zoomable 2D viewport with an infinite grid.
+// Viewport3D — perspective 3D viewport with orbit camera and ground-plane grid.
 //
-// Coordinate conventions:
-//   Screen space — y=0 at top, increasing downward, logical pixels.
-//   World space  — x right, y downward (matches screen at zoom=1, pan=origin).
-//   pan_x/pan_y  — screen position of world origin (0,0), logical pixels.
-//   zoom         — logical pixels per world unit.
+// Camera model:
+//   target    — world point the camera orbits around
+//   azimuth   — horizontal rotation (radians, 0 = front: eye on +Z axis)
+//   elevation — vertical tilt (radians, clamped to ±85°; positive = above)
+//   distance  — camera-to-target distance
+//   fov_y     — vertical field of view (radians)
 //
-// Input:
-//   Middle-mouse drag or left-mouse drag in the viewport area → pan.
-//   Scroll wheel → zoom centred on the cursor.
+// Controls:
+//   MMB drag         → orbit (azimuth + elevation)
+//   Shift+MMB drag   → pan (translate target in camera right/up plane)
+//   Scroll wheel     → dolly (scale distance)
 // ---------------------------------------------------------------------------
 
-class Viewport2D {
+class Viewport3D {
 public:
-    Viewport2D() = default;
+    Viewport3D() = default;
 
-    // Call once after the GL context is ready.
     bool init();
-
-    // Call when the logical window size changes.
     void set_viewport(float w, float h);
-
-    // Manually position the world origin in screen space (e.g., to centre the
-    // view after the first set_viewport call).
-    void set_pan(float x, float y) { _pan_x = x; _pan_y = y; }
-
-    // Draw the grid into the area below header_h.
     void draw(float header_h);
 
     // GLFW event forwarding — called by App callbacks.
     void handle_mouse_move  (float mx, float my);
-    void handle_mouse_button(float mx, float my, bool pressed, bool released, int btn);
+    void handle_mouse_button(float mx, float my, bool pressed, bool released,
+                             int btn, int mods);
     void handle_scroll      (float mx, float my, float delta_y);
 
 private:
-    Grid  _grid;
-    float _vp_w  = 800.f;
-    float _vp_h  = 600.f;
-    float _pan_x = 400.f;   // world origin in screen space
-    float _pan_y = 300.f;
-    float _zoom  = 50.f;    // logical pixels per world unit
+    void _update_matrices();
 
-    // Panning drag state
-    bool  _panning       = false;
-    int   _pan_btn       = -1;   // GLFW button that started the pan
+    Grid  _grid;
+    float _vp_w = 800.f, _vp_h = 600.f;
+
+    // Orbit camera
+    Vec3  _target    = {0.f, 0.f, 0.f};
+    float _azimuth   = 0.7854f;   // 45° — isometric-ish start
+    float _elevation = 0.6154f;   // ~35.26° — classic "cube corner" angle
+    float _distance  = 10.f;
+    float _fov_y     = 1.0472f;   // 60°
+
+    // Cached per-frame matrices
+    Mat4  _view_proj;
+    Mat4  _inv_view_proj;
+    Vec3  _eye;
+
+    // Drag state
+    bool  _dragging      = false;
+    int   _drag_btn      = -1;
+    int   _drag_mods     = 0;
     float _drag_start_mx = 0.f;
     float _drag_start_my = 0.f;
-    float _pan_at_drag_x = 0.f;
-    float _pan_at_drag_y = 0.f;
+    float _drag_az0      = 0.f;   // azimuth  at drag start
+    float _drag_el0      = 0.f;   // elevation at drag start
+    Vec3  _drag_target0  = {};    // target    at drag start
 
     float _mouse_x = 0.f;
     float _mouse_y = 0.f;

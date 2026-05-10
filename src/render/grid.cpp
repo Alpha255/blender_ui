@@ -9,89 +9,117 @@ namespace bl_ui {
 // GLSL shaders
 // ---------------------------------------------------------------------------
 
-// Vertex shader — draws a full-viewport quad in screen-space coordinates
-// (y=0 at top, same convention as the rest of the UI).  The fragment shader
-// receives the logical-pixel position so it can compute world coordinates.
+// Vertex: full-screen quad in logical screen pixels (y=0 at top).
+// The quad covers (0,0)→(vp_w, vp_h) so vPos gives the logical screen
+// position; the fragment shader uses it to derive NDC for unprojection.
 static const char* GRID_VERT = R"GLSL(
 #version 330 core
-layout(location = 0) in vec2 aPos;  // logical screen pixels (y=0 top)
-uniform vec2 uViewport;             // logical viewport size
-out vec2 vPos;                      // passed to fragment shader
+layout(location = 0) in vec2 aPos;   // logical screen pixels, y=0 at top
+uniform vec2 uViewport;              // logical (w, h)
+out vec2 vPos;
 
 void main() {
     vPos = aPos;
-    float nx =  (aPos.x / uViewport.x) * 2.0 - 1.0;
-    float ny = -(aPos.y / uViewport.y) * 2.0 + 1.0;
-    gl_Position = vec4(nx, ny, 0.0, 1.0);
+    // Map logical → NDC: x:[0,w]→[-1,1], y:[0,h]→[1,-1] (flip y)
+    gl_Position = vec4(
+        aPos.x / uViewport.x * 2.0 - 1.0,
+        1.0 - aPos.y / uViewport.y * 2.0,
+        0.0, 1.0
+    );
 }
 )GLSL";
 
-// Fragment shader — analytical infinite grid.
+// Fragment: perspective ray-plane intersection grid.
 //
-// The fwidth()-based formula makes each grid line exactly ~1 screen pixel wide
-// regardless of zoom.  Minor and major grid lines are blended on top of the
-// background colour; axis lines (world x=0 and y=0) are drawn last with a
-// distinct colour.
-//
-// uSpacing      — minor grid spacing in world units (computed on CPU)
-// uMajorFactor  — major_spacing = uSpacing * uMajorFactor (typically 5)
+// Each fragment unprojects its NDC position via uInvViewProj to get a world
+// ray, intersects y=0 ground plane, then evaluates the grid analytically.
+// fwidth() on the world coordinate naturally handles perspective foreshortening.
 static const char* GRID_FRAG = R"GLSL(
 #version 330 core
-in  vec2 vPos;
+in  vec2 vPos;          // logical screen px, y=0 at top
 out vec4 fragColor;
 
-uniform vec2  uViewport;
-uniform vec2  uPan;         // screen pos of world origin (logical px)
-uniform float uZoom;        // logical px per world unit
-uniform float uHeaderH;     // px occupied by menu bar (grid hidden above)
-uniform float uSpacing;     // minor grid spacing, world units
-uniform float uMajorFactor; // major_spacing = uSpacing * uMajorFactor
+uniform mat4  uViewProj;
+uniform mat4  uInvViewProj;
+uniform vec3  uEye;
+uniform vec2  uViewport;    // logical (w, h)
+uniform float uHeaderH;     // logical px: suppress grid above this y
+uniform float uSpacingMin;  // minor grid spacing, world units
+uniform float uSpacingMaj;  // major grid spacing, world units
+uniform float uFadeNear;    // distance fade start, world units
+uniform float uFadeFar;     // distance fade end, world units
 
 uniform vec4 uBgColor;
 uniform vec4 uGridColor;
 uniform vec4 uGridMajorColor;
-uniform vec4 uAxisXColor;   // world y=0 (horizontal line)
-uniform vec4 uAxisYColor;   // world x=0 (vertical line)
+uniform vec4 uAxisXColor;   // X axis: z=0 line
+uniform vec4 uAxisZColor;   // Z axis: x=0 line
 
-// Returns [0,1] coverage of a 1-px wide grid line centred at every
-// `spacing` world-units along `world_coord`.
-// fwidth(c) gives the rate of change of c per screen pixel, so the
-// smoothstep envelope is always 1 pixel wide in screen space.
+// Analytical AA grid line coverage.
+// Returns 1 at line centres, 0 between lines, ~1px transition.
 float line_alpha(float world_coord, float spacing) {
-    float c    = world_coord / spacing;
-    float dfc  = max(fwidth(c), 1e-4);
-    float dist = abs(fract(c + 0.5) - 0.5);   // 0 = on a line, 0.5 = halfway between
-    return 1.0 - smoothstep(dfc * 0.4, dfc * 1.4, dist);
+    float c   = world_coord / spacing;
+    float dfc = max(fwidth(c), 1e-5);
+    float d   = abs(fract(c + 0.5) - 0.5);  // 0 on line, 0.5 midway
+    return 1.0 - smoothstep(dfc * 0.5, dfc * 1.5, d);
 }
 
 void main() {
-    // Suppress grid in the menu-bar strip.
+    // Default depth for fragments that don't hit the ground plane.
+    // gl_FragDepth must be written in every execution path when used at all.
+    gl_FragDepth = 1.0;
+
+    // Suppress the menu-bar strip (y=0 is top of window).
     if (vPos.y < uHeaderH) {
         fragColor = uBgColor;
         return;
     }
 
-    // World coordinates of this fragment (y increases downward, matching screen).
-    vec2 w = (vPos - uPan) / uZoom;
+    // NDC of this fragment (logical screen → NDC, y flipped).
+    vec2 ndc = vec2(
+        vPos.x / uViewport.x * 2.0 - 1.0,
+        1.0 - vPos.y / uViewport.y * 2.0
+    );
 
-    float maj = uSpacing * uMajorFactor;
+    // Unproject near/far clip-plane points → world space via homogeneous div.
+    vec4 nh = uInvViewProj * vec4(ndc, -1.0, 1.0);
+    vec4 fh = uInvViewProj * vec4(ndc,  1.0, 1.0);
+    vec3 near_w = nh.xyz / nh.w;
+    vec3 far_w  = fh.xyz / fh.w;
+    vec3 ray    = far_w - near_w;   // world-space ray direction (unnormalized)
 
-    // Minor grid: max of horizontal and vertical line coverages.
-    float minor_a = max(line_alpha(w.x, uSpacing), line_alpha(w.y, uSpacing));
+    // Intersect with y=0 ground plane: near_w.y + t * ray.y = 0 → t = ...
+    if (abs(ray.y) < 1e-6) { fragColor = uBgColor; return; }
+    float t = -near_w.y / ray.y;
+    if (t < 0.0) { fragColor = uBgColor; return; }   // behind camera
 
-    // Major grid (overlaid on minor).
-    float major_a = max(line_alpha(w.x, maj), line_alpha(w.y, maj));
+    vec3 hit = near_w + t * ray;    // world-space hit on y=0
 
-    // Axis lines — 1.5 px wide in screen space, independent of zoom.
-    float ax_a = 1.0 - smoothstep(0.0, 1.5, abs(vPos.y - uPan.y)); // world y=0
-    float ay_a = 1.0 - smoothstep(0.0, 1.5, abs(vPos.x - uPan.x)); // world x=0
+    // Overwrite with correct depth for this ground-plane hit point.
+    vec4 clip = uViewProj * vec4(hit, 1.0);
+    gl_FragDepth = (clip.z / clip.w) * 0.5 + 0.5;
 
-    // Composite: bg → minor → major → axes.
+    // Grid line coverages at hit point.
+    float minor_a = max(line_alpha(hit.x, uSpacingMin),
+                        line_alpha(hit.z, uSpacingMin));
+    float major_a = max(line_alpha(hit.x, uSpacingMaj),
+                        line_alpha(hit.z, uSpacingMaj));
+
+    // Axis lines: X axis is the z=0 line, Z axis is the x=0 line.
+    // Use fwidth of the axis coordinate for consistent 1-px screen width.
+    float axX_a = 1.0 - smoothstep(0.0, fwidth(hit.z) * 2.0, abs(hit.z));
+    float axZ_a = 1.0 - smoothstep(0.0, fwidth(hit.x) * 2.0, abs(hit.x));
+
+    // Distance fade (linear → smooth falloff).
+    float dist  = length(hit - uEye);
+    float fade  = 1.0 - smoothstep(uFadeNear, uFadeFar, dist);
+
+    // Composite: bg → minor → major → X-axis → Z-axis.
     vec4 col = uBgColor;
-    col = mix(col, uGridColor,      minor_a * 0.7);
-    col = mix(col, uGridMajorColor, major_a);
-    col = mix(col, uAxisXColor,     ax_a);
-    col = mix(col, uAxisYColor,     ay_a);
+    col = mix(col, uGridColor,      minor_a * 0.7 * fade);
+    col = mix(col, uGridMajorColor, major_a       * fade);
+    col = mix(col, uAxisXColor,     axX_a         * fade);
+    col = mix(col, uAxisZColor,     axZ_a         * fade);
 
     fragColor = col;
 }
@@ -111,23 +139,25 @@ bool Grid::init() {
     _prog = compile_shader(GRID_VERT, GRID_FRAG);
     if (!_prog) return false;
 
-    _u_viewport     = glGetUniformLocation(_prog, "uViewport");
-    _u_pan          = glGetUniformLocation(_prog, "uPan");
-    _u_zoom         = glGetUniformLocation(_prog, "uZoom");
-    _u_header_h     = glGetUniformLocation(_prog, "uHeaderH");
-    _u_spacing      = glGetUniformLocation(_prog, "uSpacing");
-    _u_major_factor = glGetUniformLocation(_prog, "uMajorFactor");
-    _u_bg           = glGetUniformLocation(_prog, "uBgColor");
-    _u_grid         = glGetUniformLocation(_prog, "uGridColor");
-    _u_grid_major   = glGetUniformLocation(_prog, "uGridMajorColor");
-    _u_axis_x       = glGetUniformLocation(_prog, "uAxisXColor");
-    _u_axis_y       = glGetUniformLocation(_prog, "uAxisYColor");
+    _u_view_proj   = glGetUniformLocation(_prog, "uViewProj");
+    _u_inv_vp      = glGetUniformLocation(_prog, "uInvViewProj");
+    _u_eye         = glGetUniformLocation(_prog, "uEye");
+    _u_viewport    = glGetUniformLocation(_prog, "uViewport");
+    _u_header_h    = glGetUniformLocation(_prog, "uHeaderH");
+    _u_spacing_min = glGetUniformLocation(_prog, "uSpacingMin");
+    _u_spacing_maj = glGetUniformLocation(_prog, "uSpacingMaj");
+    _u_fade_near   = glGetUniformLocation(_prog, "uFadeNear");
+    _u_fade_far    = glGetUniformLocation(_prog, "uFadeFar");
+    _u_bg          = glGetUniformLocation(_prog, "uBgColor");
+    _u_grid        = glGetUniformLocation(_prog, "uGridColor");
+    _u_grid_major  = glGetUniformLocation(_prog, "uGridMajorColor");
+    _u_axis_x      = glGetUniformLocation(_prog, "uAxisXColor");
+    _u_axis_z      = glGetUniformLocation(_prog, "uAxisZColor");
 
     glGenVertexArrays(1, &_vao);
     glGenBuffers(1, &_vbo);
     glBindVertexArray(_vao);
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    // 6 vertices × 2 floats (full-screen quad, updated each frame)
     glBufferData(GL_ARRAY_BUFFER, 6 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
@@ -141,23 +171,23 @@ void Grid::set_viewport(float w, float h) {
     _vp_h = h;
 }
 
-// Choose minor-grid world-unit spacing so that grid lines are roughly
-// 80 logical pixels apart on screen.  Snaps to {1,2,5}×10^n increments
-// to match the "round number" convention used in most 2D editors.
-float Grid::_spacing(float zoom) {
-    float world_target = 80.f / zoom;
-    if (world_target <= 0.f) return 1.f;
-    float power = std::pow(10.f, std::floor(std::log10(world_target)));
-    float norm  = world_target / power;
+// Snap to {1, 2, 5}×10^n so that minor spacing is ~10% of camera distance.
+float Grid::_spacing(float distance) {
+    float target = distance * 0.1f;
+    if (target <= 0.f) return 1.f;
+    float power = std::pow(10.f, std::floor(std::log10(target)));
+    float norm  = target / power;
     if      (norm > 5.f) return power * 10.f;
     else if (norm > 2.f) return power * 5.f;
     else if (norm > 1.f) return power * 2.f;
     return power;
 }
 
-void Grid::draw(float pan_x, float pan_y, float zoom, float header_h) {
-    // Full-viewport quad covering (0,0)→(vp_w,vp_h) in screen coords.
+void Grid::draw(const Mat4& view_proj, const Mat4& inv_view_proj,
+                const Vec3& eye, float distance, float header_h)
+{
     float w = _vp_w, h = _vp_h;
+    // Full-screen quad in logical screen coordinates.
     float quad[12] = {
         0.f, 0.f,   w,  0.f,   w,  h,
         0.f, 0.f,   w,  h,    0.f, h,
@@ -165,26 +195,44 @@ void Grid::draw(float pan_x, float pan_y, float zoom, float header_h) {
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(quad), quad);
 
-    float spacing = _spacing(zoom);
+    float sp_min = _spacing(distance);
+    float sp_maj = sp_min * 10.f;
+
+    // Fade lines over 5×–20× camera distance.
+    float fade_near = distance * 5.f;
+    float fade_far  = distance * 20.f;
 
     using namespace Theme;
     glUseProgram(_prog);
-    glUniform2f(_u_viewport,     w, h);
-    glUniform2f(_u_pan,          pan_x, pan_y);
-    glUniform1f(_u_zoom,         zoom);
-    glUniform1f(_u_header_h,     header_h);
-    glUniform1f(_u_spacing,      spacing);
-    glUniform1f(_u_major_factor, 5.f);
-    glUniform4f(_u_bg,           VIEWPORT_BG.rf(),      VIEWPORT_BG.gf(),      VIEWPORT_BG.bf(),      1.f);
-    glUniform4f(_u_grid,         GRID_LINE.rf(),        GRID_LINE.gf(),        GRID_LINE.bf(),        1.f);
-    glUniform4f(_u_grid_major,   GRID_LINE_MAJOR.rf(),  GRID_LINE_MAJOR.gf(),  GRID_LINE_MAJOR.bf(),  1.f);
-    glUniform4f(_u_axis_x,       GRID_AXIS_X.rf(),      GRID_AXIS_X.gf(),      GRID_AXIS_X.bf(),      1.f);
-    glUniform4f(_u_axis_y,       GRID_AXIS_Y.rf(),      GRID_AXIS_Y.gf(),      GRID_AXIS_Y.bf(),      1.f);
+    glUniformMatrix4fv(_u_view_proj, 1, GL_FALSE, view_proj.data());
+    glUniformMatrix4fv(_u_inv_vp,    1, GL_FALSE, inv_view_proj.data());
+    glUniform3f(_u_eye,         eye.x, eye.y, eye.z);
+    glUniform2f(_u_viewport,    w, h);
+    glUniform1f(_u_header_h,    header_h);
+    glUniform1f(_u_spacing_min, sp_min);
+    glUniform1f(_u_spacing_maj, sp_maj);
+    glUniform1f(_u_fade_near,   fade_near);
+    glUniform1f(_u_fade_far,    fade_far);
+    glUniform4f(_u_bg,          VIEWPORT_BG.rf(),      VIEWPORT_BG.gf(),      VIEWPORT_BG.bf(),      1.f);
+    glUniform4f(_u_grid,        GRID_LINE.rf(),        GRID_LINE.gf(),        GRID_LINE.bf(),        1.f);
+    glUniform4f(_u_grid_major,  GRID_LINE_MAJOR.rf(),  GRID_LINE_MAJOR.gf(),  GRID_LINE_MAJOR.bf(),  1.f);
+    glUniform4f(_u_axis_x,      GRID_AXIS_X.rf(),      GRID_AXIS_X.gf(),      GRID_AXIS_X.bf(),      1.f);
+    glUniform4f(_u_axis_z,      GRID_AXIS_Y.rf(),      GRID_AXIS_Y.gf(),      GRID_AXIS_Y.bf(),      1.f);
 
-    glDisable(GL_BLEND); // grid is fully opaque; no blending needed
+    // Grid renders into depth buffer so future 3D geometry composites correctly.
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);   // always write, no depth rejection on this pass
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+
     glBindVertexArray(_vao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
+
+    // Restore state: leave depth test disabled so 2D UI draws on top unobstructed.
+    // Callers that want to draw 3D geometry after this can re-enable depth test.
+    glDepthFunc(GL_LESS);
+    glDisable(GL_DEPTH_TEST);
 }
 
 } // namespace bl_ui
