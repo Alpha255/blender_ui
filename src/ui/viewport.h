@@ -4,6 +4,7 @@
 #include "../render/nav_gizmo.h"
 #include "../render/roundbox.h"
 #include "../render/font.h"
+#include "../render/gfx/backend.h"
 
 namespace bl_ui {
 
@@ -27,7 +28,7 @@ class Viewport3D {
 public:
     Viewport3D() = default;
 
-    bool init();
+    bool init(gfx::Backend& gfx);
     void set_viewport(float w, float h);
     void set_dependencies(Roundbox* rb, Font* font);
     void draw(float header_h);

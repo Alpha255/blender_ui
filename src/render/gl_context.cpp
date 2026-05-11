@@ -76,7 +76,7 @@ GLContext::~GLContext() {
     }
 }
 
-bool GLContext::init(int width, int height, const char* title) {
+bool GLContext::init(int width, int height, const char* title, bool opengl) {
     glfwSetErrorCallback(glfw_error_cb);
 
     if (!glfwInit()) {
@@ -84,14 +84,20 @@ bool GLContext::init(int width, int height, const char* title) {
         return false;
     }
     _glfw_owner = true;
+    _opengl     = opengl;
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    if (opengl) {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 #ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
-    glfwWindowHint(GLFW_SAMPLES, 4); // 4x MSAA
+        glfwWindowHint(GLFW_SAMPLES, 4);
+    } else {
+        // Vulkan: tell GLFW not to create any graphics API context.
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    }
 
     _win = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!_win) {
@@ -99,8 +105,10 @@ bool GLContext::init(int width, int height, const char* title) {
         return false;
     }
 
-    glfwMakeContextCurrent(_win);
-    glfwSwapInterval(1); // vsync
+    if (opengl) {
+        glfwMakeContextCurrent(_win);
+        glfwSwapInterval(1);
+    }
 
     return true;
 }
@@ -148,7 +156,7 @@ bool GLContext::should_close() const {
 }
 
 void GLContext::swap_buffers() {
-    if (_win) glfwSwapBuffers(_win);
+    if (_win && _opengl) glfwSwapBuffers(_win);
 }
 
 void GLContext::poll_events() {

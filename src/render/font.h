@@ -1,21 +1,22 @@
 #pragma once
-#include <GL/glew.h>
 #include "theme.h"
+#include "gfx/backend.h"
 #include <string_view>
+#include <vector>
 
 namespace bl_ui {
 
 enum class TextAlign { LEFT, CENTER, RIGHT };
 
 // ---------------------------------------------------------------------------
-// Font — stb_truetype glyph atlas + OpenGL text renderer
+// Font — stb_truetype glyph atlas + backend text renderer
 // Covers printable ASCII (32-127) baked to a single 512x512 texture.
 // ---------------------------------------------------------------------------
 
 class Font {
 public:
     Font() = default;
-    ~Font();
+    ~Font() = default;
 
     // Load a TTF file and bake glyph atlas.
     //   size_pt       — target size in logical points
@@ -24,7 +25,8 @@ public:
     //                   Atlas is baked at size_pt * dpi * content_scale / 72 px
     //                   so glyphs are crisp on HiDPI displays.
     // Returns false if no usable font file was found.
-    bool load(float size_pt = 11.f, float dpi = 96.f, float content_scale = 1.f);
+    bool load(gfx::Backend& gfx, float size_pt = 11.f,
+              float dpi = 96.f, float content_scale = 1.f);
 
     // Draw text.  (x, y) is the top-left baseline position in screen px.
     void draw_text(std::string_view text, float x, float y,
@@ -39,19 +41,25 @@ public:
     // Distance from the top of the bounding box to the text baseline, in logical px.
     float ascent() const { return _ascent / _content_scale; }
 
-    bool ready() const { return _prog != 0 && _atlas != 0; }
+    bool ready() const { return _sh != 0 && _atlas != 0; }
+
+    // Must be called once per frame (before any draw_text calls) to reset
+    // the VBO suballocation offset.  Required by the Vulkan backend to prevent
+    // draw calls in one frame from overwriting each other's vertex data.
+    void begin_frame() { _vbo_vertex_top = 0; }
 
     // Must be called whenever the logical (window) viewport size changes.
     void set_viewport(float w, float h) { _vp_w = w; _vp_h = h; }
 
 private:
     bool _bake(const char* path, float px_size);
-    void _setup_gl();
+    void _setup_gfx(gfx::Backend& gfx);
 
-    GLuint _prog  = 0;
-    GLuint _atlas = 0;
-    GLuint _vao   = 0;
-    GLuint _vbo   = 0;
+    gfx::Backend*      _gfx  = nullptr;
+    gfx::ShaderHandle  _sh   = 0;
+    gfx::TextureHandle _atlas = 0;
+    gfx::BufferHandle  _vbo  = 0;
+    int                _vbo_vertex_top = 0;  // suballocation cursor (vertices), reset each frame
 
     // Packed char data — binary-compatible with stbtt_packedchar.
     // All metric fields are in PHYSICAL pixels.
@@ -80,11 +88,8 @@ private:
     int   _atlas_w        = 512;
     int   _atlas_h        = 512;
 
-    // Uniform locations
-    GLint _u_proj       = -1;
-    GLint _u_tex        = -1;
-    GLint _u_color      = -1;
-    GLint _u_atlas_size = -1;  // ivec2 — atlas dimensions for manual bilinear bounds
+    // CPU-side atlas bitmap (kept for potential re-upload after context loss)
+    std::vector<unsigned char> _atlas_bitmap;
 };
 
 } // namespace bl_ui

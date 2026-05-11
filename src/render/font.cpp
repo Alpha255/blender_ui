@@ -1,5 +1,4 @@
 #include "font.h"
-#include "gl_context.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -70,18 +69,14 @@ static const char* FONT_PATHS[] = {
     nullptr,
 };
 
+// Vertex layout: vec4 (screen_x, screen_y, texel_u, texel_v) at location 0.
+static const gfx::VertexAttr ATTR_TEXT[] = { {0, 4, 0} };
+static const gfx::VertexLayout LAYOUT_TEXT = { ATTR_TEXT, 1, 4 * sizeof(float) };
+
 // ---------------------------------------------------------------------------
 // Font
 // ---------------------------------------------------------------------------
 
-Font::~Font() {
-    if (_vbo)   glDeleteBuffers(1, &_vbo);
-    if (_vao)   glDeleteVertexArrays(1, &_vao);
-    if (_atlas) glDeleteTextures(1, &_atlas);
-    if (_prog)  glDeleteProgram(_prog);
-}
-
-// _find_char: return packed metrics for a Unicode codepoint, nullptr if absent.
 const Font::BakedChar* Font::_find_char(unsigned cp) const {
     if (cp >= 32u && cp < 128u) return &_chars[cp - 32];
     for (int i = 0; i < _extra_count; ++i)
@@ -109,13 +104,12 @@ bool Font::_bake(const char* path, float px_size) {
                         stbtt_GetFontOffsetForIndex(ttf.data(), 0)))
         return false;
 
-    std::vector<unsigned char> bitmap(_atlas_w * _atlas_h, 0);
+    _atlas_bitmap.assign((size_t)_atlas_w * _atlas_h, 0);
 
     stbtt_pack_context spc;
-    stbtt_PackBegin(&spc, bitmap.data(), _atlas_w, _atlas_h, 0, 1, nullptr);
-    stbtt_PackSetOversampling(&spc, 2, 2); // 2×2 oversampling → better diagonal AA
+    stbtt_PackBegin(&spc, _atlas_bitmap.data(), _atlas_w, _atlas_h, 0, 1, nullptr);
+    stbtt_PackSetOversampling(&spc, 2, 2);
 
-    // ASCII 32-127
     stbtt_pack_range ascii_rng{};
     ascii_rng.font_size                        = px_size;
     ascii_rng.first_unicode_codepoint_in_range = 32;
@@ -123,7 +117,6 @@ bool Font::_bake(const char* path, float px_size) {
     ascii_rng.chardata_for_range               =
         reinterpret_cast<stbtt_packedchar*>(_chars);
 
-    // Extra UI glyphs (▶ U+25B6 — submenu arrow)
     static const int EXTRA_CPS[] = { 0x25B6 };
     stbtt_packedchar extra_packed[EXTRA_MAX] = {};
     std::vector<int> valid_extra;
@@ -133,10 +126,10 @@ bool Font::_bake(const char* path, float px_size) {
 
     stbtt_pack_range extra_rng{};
     if (!valid_extra.empty()) {
-        extra_rng.font_size                        = px_size;
-        extra_rng.array_of_unicode_codepoints      = valid_extra.data();
-        extra_rng.num_chars                        = (int)valid_extra.size();
-        extra_rng.chardata_for_range               = extra_packed;
+        extra_rng.font_size                   = px_size;
+        extra_rng.array_of_unicode_codepoints = valid_extra.data();
+        extra_rng.num_chars                   = (int)valid_extra.size();
+        extra_rng.chardata_for_range          = extra_packed;
     }
 
     stbtt_pack_range ranges[2] = { ascii_rng };
@@ -146,7 +139,6 @@ bool Font::_bake(const char* path, float px_size) {
     stbtt_PackFontRanges(&spc, ttf.data(), 0, ranges, n_ranges);
     stbtt_PackEnd(&spc);
 
-    // Binary-layout check: BakedChar must match stbtt_packedchar exactly.
     static_assert(sizeof(BakedChar) == sizeof(stbtt_packedchar),
                   "BakedChar layout mismatch with stbtt_packedchar");
 
@@ -157,63 +149,47 @@ bool Font::_bake(const char* path, float px_size) {
         ++_extra_count;
     }
 
-    // Font metrics — stored in PHYSICAL pixels.
     float scale = stbtt_ScaleForPixelHeight(&info, px_size);
     int asc, desc, lgap;
     stbtt_GetFontVMetrics(&info, &asc, &desc, &lgap);
-    _ascent = asc * scale;                    // physical — kept as-is
-    _line_h = (asc - desc + lgap) * scale;   // physical — divided in load()
+    _ascent = asc * scale;
+    _line_h = (asc - desc + lgap) * scale;
 
-    glGenTextures(1, &_atlas);
-    glBindTexture(GL_TEXTURE_2D, _atlas);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED,
-                 _atlas_w, _atlas_h, 0,
-                 GL_RED, GL_UNSIGNED_BYTE, bitmap.data());
-    // GL_NEAREST: let the fragment shader do manual bilinear (mirrors Blender).
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
     return true;
 }
 
-void Font::_setup_gl() {
-    _prog = compile_shader(TEXT_VERT, TEXT_FRAG);
-    _u_proj       = glGetUniformLocation(_prog, "uProj");
-    _u_tex        = glGetUniformLocation(_prog, "uTex");
-    _u_color      = glGetUniformLocation(_prog, "uColor");
-    _u_atlas_size = glGetUniformLocation(_prog, "uAtlasSize");
+void Font::_setup_gfx(gfx::Backend& gfx) {
+    _gfx  = &gfx;
+    _sh   = gfx.create_shader(TEXT_VERT, TEXT_FRAG);
 
-    glGenVertexArrays(1, &_vao);
-    glGenBuffers(1, &_vbo);
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER,
-                 4096 * 6 * 4 * sizeof(float),
-                 nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    // Upload atlas with GL_NEAREST (manual bilinear in shader).
+    _atlas = gfx.create_texture(_atlas_w, _atlas_h,
+                                 gfx::PixelFormat::R8,
+                                 gfx::FilterMode::Nearest,
+                                 _atlas_bitmap.data());
+
+    // Dynamic VBO: 4096 glyphs × 6 verts × 4 floats.
+    _vbo = gfx.create_buffer(nullptr,
+                              4096 * 6 * 4 * sizeof(float), true);
 }
 
-bool Font::load(float size_pt, float dpi, float content_scale) {
+bool Font::load(gfx::Backend& gfx, float size_pt, float dpi, float content_scale) {
     _content_scale = (content_scale > 0.f) ? content_scale : 1.f;
     float px_size  = size_pt * dpi * _content_scale / 72.f;
-    //float px_size = size_pt * _content_scale;
 
     for (int i = 0; FONT_PATHS[i]; ++i) {
         if (_bake(FONT_PATHS[i], px_size)) {
             std::cerr << "[bl_ui] Font loaded: " << FONT_PATHS[i]
                       << "  px=" << px_size << "\n";
-            _setup_gl();
-            if (_prog) {
-                // _ascent stays in physical pixels (used internally by draw_text).
-                // _line_h exposed to callers in logical pixels.
+            _setup_gfx(gfx);
+            if (_sh) {
                 _line_h /= _content_scale;
                 return true;
             }
-            glDeleteTextures(1, &_atlas); _atlas = 0;
+            // GPU setup failed — clean up and try next font.
+            _atlas = 0;
+            _sh    = 0;
+            _vbo   = 0;
         }
     }
     std::cerr << "[bl_ui] Font::load — no usable TTF font found\n";
@@ -221,8 +197,7 @@ bool Font::load(float size_pt, float dpi, float content_scale) {
 }
 
 // ---------------------------------------------------------------------------
-// UTF-8 decode helper (inline, reused in draw_text and measure_text)
-// Returns codepoint and advances i by the sequence length.
+// UTF-8 decode helper
 // ---------------------------------------------------------------------------
 
 static inline unsigned utf8_decode(std::string_view text, std::size_t& i) {
@@ -242,15 +217,7 @@ static inline unsigned utf8_decode(std::string_view text, std::size_t& i) {
 }
 
 // ---------------------------------------------------------------------------
-// draw_text — works entirely in PHYSICAL pixels to avoid float-roundtrip blur.
-//
-// Key design:
-//   • Input x,y are LOGICAL pixels (same coord space as the rest of the UI).
-//   • We convert to physical at the start, keeping full sub-pixel precision
-//     horizontally (2× h-oversampling handles it) and rounding vertically
-//     (1× v-resolution — rounding prevents inter-line blur).
-//   • The projection matrix maps physical pixels → NDC, matching glViewport
-//     which is set to the physical framebuffer size in app.cpp.
+// draw_text
 // ---------------------------------------------------------------------------
 
 void Font::draw_text(std::string_view text, float x, float y,
@@ -266,48 +233,37 @@ void Font::draw_text(std::string_view text, float x, float y,
     std::vector<float> verts;
     verts.reserve(text.size() * 6 * 4);
 
-    float cs = _content_scale;
-    // Horizontal: keep sub-pixel precision (2× h-oversampling uses it).
-    // Vertical:   snap to physical pixel boundary to avoid v-blur.
+    float cs       = _content_scale;
     float cx       = x * cs;
-    float baseline = std::round(y * cs) + _ascent; // _ascent is physical px
+    float baseline = std::round(y * cs) + _ascent;
 
     for (std::size_t i = 0; i < text.size(); ) {
         unsigned cp = utf8_decode(text, i);
         const BakedChar* bc = _find_char(cp);
         if (!bc) continue;
 
-        // xoff/xoff2, yoff/yoff2 are physical-pixel offsets set by the pack API.
-        float qx0 = cx + bc->xoff;
-        float qy0 = baseline + bc->yoff;
-        float qx1 = cx + bc->xoff2;
-        float qy1 = baseline + bc->yoff2;
-
-        // Texel-space UVs: integer atlas pixel coordinates (not normalized).
-        // The fragment shader uses fract(vTexel - 0.5) for bilinear weights,
-        // so integer values land exactly at texel boundaries, giving proper
-        // per-texel coverage across the 2× oversampled glyph region.
-        float qs0 = float(bc->x0);
-        float qt0 = float(bc->y0);
-        float qs1 = float(bc->x1);
-        float qt1 = float(bc->y1);
+        float qx0 = cx + bc->xoff,  qy0 = baseline + bc->yoff;
+        float qx1 = cx + bc->xoff2, qy1 = baseline + bc->yoff2;
+        float qs0 = float(bc->x0),  qt0 = float(bc->y0);
+        float qs1 = float(bc->x1),  qt1 = float(bc->y1);
 
         verts.insert(verts.end(), {qx0,qy0,qs0,qt0,  qx1,qy0,qs1,qt0,  qx1,qy1,qs1,qt1});
         verts.insert(verts.end(), {qx0,qy0,qs0,qt0,  qx1,qy1,qs1,qt1,  qx0,qy1,qs0,qt1});
 
-        cx += bc->xadvance; // advance in physical px, no division needed
+        cx += bc->xadvance;
     }
-
     if (verts.empty()) return;
 
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0,
-                    verts.size() * sizeof(float), verts.data());
+    int vertex_count = static_cast<int>(verts.size() / 4);
+    static constexpr int VBO_CAPACITY = 4096 * 6;  // matches _setup_gfx allocation
+    if (_vbo_vertex_top + vertex_count > VBO_CAPACITY) _vbo_vertex_top = 0;
+    size_t byte_offset = (size_t)_vbo_vertex_top * 4 * sizeof(float);
+    _gfx->update_buffer(_vbo, verts.data(), verts.size() * sizeof(float), byte_offset);
+    int first_vertex = _vbo_vertex_top;
+    _vbo_vertex_top += vertex_count;
 
-    // Project physical pixels → NDC.  _vp_w/_vp_h are logical; multiply by cs
-    // to get physical dimensions that match the glViewport set in app.cpp.
-    float pw = _vp_w * cs;
-    float ph = _vp_h * cs;
+    // Orthographic projection from physical pixels to NDC.
+    float pw = _vp_w * cs, ph = _vp_h * cs;
     float proj[16] = {
          2.f/pw,    0.f,    0.f, 0.f,
          0.f,   -2.f/ph,   0.f, 0.f,
@@ -315,20 +271,13 @@ void Font::draw_text(std::string_view text, float x, float y,
         -1.f,       1.f,   0.f, 1.f,
     };
 
-    glUseProgram(_prog);
-    glUniformMatrix4fv(_u_proj, 1, GL_FALSE, proj);
-    glUniform1i(_u_tex, 0);
-    glUniform4f(_u_color, color.rf(), color.gf(), color.bf(), color.af());
-    glUniform2i(_u_atlas_size, _atlas_w, _atlas_h);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, _atlas);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glBindVertexArray(_vao);
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 4));
-    glBindVertexArray(0);
+    _gfx->set_blend_alpha(true);
+    _gfx->use_shader(_sh);
+    _gfx->uniform_m4("uProj", proj);
+    _gfx->uniform_4f("uColor", color.rf(), color.gf(), color.bf(), color.af());
+    _gfx->uniform_2i("uAtlasSize", _atlas_w, _atlas_h);
+    _gfx->bind_texture(0, _atlas, "uTex");
+    _gfx->draw_triangles(_vbo, LAYOUT_TEXT, first_vertex, vertex_count);
 }
 
 float Font::measure_text(std::string_view text) const {
@@ -338,7 +287,7 @@ float Font::measure_text(std::string_view text) const {
         const BakedChar* bc = _find_char(cp);
         if (bc) w += bc->xadvance;
     }
-    return w / _content_scale; // physical → logical
+    return w / _content_scale;
 }
 
 } // namespace bl_ui

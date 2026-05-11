@@ -1,7 +1,7 @@
 #pragma once
-#include <GL/glew.h>
 #include "theme.h"
 #include "mat4.h"
+#include "gfx/backend.h"
 
 namespace bl_ui {
 
@@ -23,9 +23,9 @@ namespace bl_ui {
 class Grid {
 public:
     Grid()  = default;
-    ~Grid();
+    ~Grid() = default;
 
-    bool init();
+    bool init(gfx::Backend& gfx);
     void set_viewport(float w, float h);
 
     // Draw the ground-plane grid.
@@ -38,26 +38,12 @@ public:
               const Vec3& eye, float distance, float header_h);
 
 private:
-    // Adaptive spacing: minor lines ~10% of distance apart, snapped to {1,2,5}×10^n.
     static float _spacing(float distance);
 
-    GLuint _prog = 0, _vao = 0, _vbo = 0;
-    float  _vp_w = 800.f, _vp_h = 600.f;
-
-    GLint _u_view_proj   = -1;
-    GLint _u_inv_vp      = -1;
-    GLint _u_eye         = -1;
-    GLint _u_viewport    = -1;
-    GLint _u_header_h    = -1;
-    GLint _u_spacing_min = -1;
-    GLint _u_spacing_maj = -1;
-    GLint _u_fade_near   = -1;
-    GLint _u_fade_far    = -1;
-    GLint _u_bg          = -1;
-    GLint _u_grid        = -1;
-    GLint _u_grid_major  = -1;
-    GLint _u_axis_x      = -1;
-    GLint _u_axis_z      = -1;
+    gfx::Backend*      _gfx = nullptr;
+    gfx::ShaderHandle  _sh  = 0;
+    gfx::BufferHandle  _vbo = 0;   // full-screen quad, updated each frame
+    float _vp_w = 800.f, _vp_h = 600.f;
 };
 
 } // namespace bl_ui

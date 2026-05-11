@@ -11,8 +11,12 @@ namespace bl_ui {
 // ---------------------------------------------------------------------------
 
 App::App(int width, int height, const char* title) {
+#ifdef BLUI_VULKAN_BACKEND
+    if (!_ctx.init(width, height, title, /*opengl=*/false)) return;
+#else
     if (!_ctx.init(width, height, title)) return;
     if (!_ctx.init_gl())                  return;
+#endif
 
     // Query content scale (HiDPI factor, e.g. 1.5 on 150% Windows scaling)
     _ctx.get_content_scale(_content_scale, _content_scale);
@@ -30,18 +34,24 @@ App::App(int width, int height, const char* title) {
     _vp_w = float(ww);
     _vp_h = float(wh);
 
-    // Physical framebuffer size — only used for glViewport.
+    // Physical framebuffer size — used for begin_frame().
     _ctx.get_framebuffer_size(_fb_w, _fb_h);
 
-    if (!_rb.init())       { std::cerr << "[bl_ui] Roundbox init failed\n";   return; }
-    if (!_viewport.init()) { std::cerr << "[bl_ui] Viewport3D init failed\n"; return; }
+#ifdef BLUI_VULKAN_BACKEND
+    _gfx = std::make_unique<gfx::VkBackend>(_ctx.window());
+#else
+    _gfx = std::make_unique<gfx::GlBackend>(_ctx.window());
+#endif
+    if (!_gfx->init(_ctx.window(), _fb_w, _fb_h)) {
+        std::cerr << "[bl_ui] Backend init failed\n"; return;
+    }
 
-    // Blender formula: U.dpi = getDPIHint()*ui_scale*(72/96); scale_factor = U.dpi/72 = ui_scale
-    // Font px = 11 * scale_factor.  At 100% Windows (ui_scale=1): 11px.
-    // Our stb_truetype has no hinting — FreeType's hinting makes strokes snap to whole
-    // pixels, appearing bolder/larger. Compensate by rendering ~17% larger (≈13px at 1×).
-    // Equivalent to Blender at ui_scale≈1.17 or "Resolution Scale" ≈ 1.17 in Preferences.
-    if (!_font.load(Theme::FONT_SIZE_PT, 96.f, _content_scale)) {
+    if (!_rb.init(*_gfx))           { std::cerr << "[bl_ui] Roundbox init failed\n";   return; }
+    if (!_viewport.init(*_gfx))     { std::cerr << "[bl_ui] Viewport3D init failed\n"; return; }
+
+    // Font px = 11 * scale_factor.  Our stb_truetype has no hinting — compensate
+    // by rendering ~17% larger (≈13px at 1×), matching Blender's ui_scale≈1.17.
+    if (!_font.load(*_gfx, Theme::FONT_SIZE_PT, 96.f, _content_scale)) {
         std::cerr << "[bl_ui] Font load failed\n"; return;
     }
 
@@ -49,7 +59,7 @@ App::App(int width, int height, const char* title) {
     // Falls back gracefully: icons are optional (no icon is drawn when atlas is not ready).
     {
         const std::string svg_dir = "E:/SourceCode/Graph/blender_ui/assets/icons";
-        if (!_icons.init(svg_dir, 16.f, _content_scale)) {
+        if (!_icons.init(*_gfx, svg_dir, 16.f, _content_scale)) {
             std::cerr << "[bl_ui] IconAtlas init failed (icons will be skipped)\n";
         }
         _icons.set_viewport(_vp_w, _vp_h);
@@ -148,12 +158,11 @@ void App::run() {
     while (!_ctx.should_close()) {
         _ctx.poll_events();
 
-        // Set viewport to physical framebuffer for full-resolution rendering.
-        glViewport(0, 0, _fb_w, _fb_h);
-
+        _gfx->begin_frame(_fb_w, _fb_h);
+        _font.begin_frame();
+        _icons.begin_frame();
         RGBA bg = Theme::VIEWPORT_BG;
-        glClearColor(bg.rf(), bg.gf(), bg.bf(), 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        _gfx->clear(bg.rf(), bg.gf(), bg.bf(), 1.f);
 
         // Viewport grid (below the menu bar).
         _viewport.draw(Theme::HEADER_H);
@@ -210,7 +219,8 @@ void App::run() {
             }
         }
 
-        _ctx.swap_buffers();
+        _gfx->end_frame();
+        _ctx.swap_buffers();  // no-op for Vulkan (_opengl=false); GL uses glfwSwapBuffers
     }
 }
 

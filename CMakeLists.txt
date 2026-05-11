@@ -62,6 +62,7 @@ set(BL_UI_SOURCES
     src/core/layout.cpp
     src/core/keymap.cpp
     src/render/gl_context.cpp
+    src/render/gfx/gl_backend.cpp
     src/render/roundbox.cpp
     src/render/font.cpp
     src/render/icon_atlas.cpp
@@ -79,6 +80,16 @@ set(BL_UI_SOURCES
     src/ui/app.cpp
 )
 
+# ---------------------------------------------------------------------------
+# Optional Vulkan backend — enable with -DBLUI_VULKAN_BACKEND=ON
+# Requires: Vulkan SDK (dxcompiler from the SDK is used for GLSL → SPIR-V)
+# ---------------------------------------------------------------------------
+option(BLUI_VULKAN_BACKEND "Build the Vulkan rendering backend" OFF)
+if(BLUI_VULKAN_BACKEND)
+    find_package(Vulkan REQUIRED)
+    list(APPEND BL_UI_SOURCES src/render/gfx/vk_backend.cpp)
+endif()
+
 add_library(bl_ui STATIC ${BL_UI_SOURCES})
 
 target_include_directories(bl_ui
@@ -95,6 +106,24 @@ target_link_libraries(bl_ui
         glfw3_bundled
         glew_bundled
 )
+
+if(BLUI_VULKAN_BACKEND)
+    target_compile_definitions(bl_ui PUBLIC BLUI_VULKAN_BACKEND)
+    target_link_libraries(bl_ui PUBLIC Vulkan::Vulkan)
+    # DXC ships with the Vulkan SDK and is used for runtime GLSL → SPIR-V.
+    # glslang ships with the Vulkan SDK and handles GLSL → SPIR-V.
+    # Use debug libs in Debug builds, release libs otherwise.
+    set(_VK_LIB "$ENV{VULKAN_SDK}/Lib")
+    foreach(_lib glslang SPIRV glslang-default-resource-limits
+                 MachineIndependent GenericCodeGen OSDependent
+                 SPIRV-Tools SPIRV-Tools-opt)
+        target_link_libraries(bl_ui PUBLIC
+            "$<$<CONFIG:Debug>:${_VK_LIB}/${_lib}d.lib>"
+            "$<$<NOT:$<CONFIG:Debug>>:${_VK_LIB}/${_lib}.lib>"
+        )
+    endforeach()
+    target_include_directories(bl_ui PUBLIC "$ENV{VULKAN_SDK}/Include")
+endif()
 
 if(WIN32 AND MSVC)
     # /utf-8 so string literals with Unicode in source are compiled correctly
@@ -114,3 +143,4 @@ add_custom_command(TARGET bl_ui_demo POST_BUILD
         "${TP}/glfw/lib/glfw3.dll"
         $<TARGET_FILE_DIR:bl_ui_demo>
 )
+

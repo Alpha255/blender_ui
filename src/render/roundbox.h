@@ -1,6 +1,6 @@
 #pragma once
-#include <GL/glew.h>
 #include "theme.h"
+#include "gfx/backend.h"
 
 namespace bl_ui {
 
@@ -13,10 +13,10 @@ namespace bl_ui {
 class Roundbox {
 public:
     Roundbox() = default;
-    ~Roundbox();
+    ~Roundbox() = default;
 
-    // Must be called with an active OpenGL context.
-    bool init();
+    // Must be called with an active graphics context.
+    bool init(gfx::Backend& gfx);
 
     // Set current viewport size (call on framebuffer resize).
     void set_viewport(float width, float height);
@@ -56,24 +56,15 @@ public:
                            float width, RGBA color);
 
 private:
-    // Rounded-rect SDF shader
-    GLuint _prog    = 0;
-    GLuint _vao     = 0;
-    GLuint _vbo     = 0;
-    GLint _u_rect      = -1;
-    GLint _u_viewport  = -1;
-    GLint _u_size      = -1;
-    GLint _u_radius4   = -1;  // vec4: top-left, top-right, bottom-left, bottom-right
-    GLint _u_color_bg  = -1;
-    GLint _u_color_out = -1;
-    GLint _u_out_width = -1;
+    gfx::Backend*      _gfx     = nullptr;
 
-    // Simple solid-color triangle shader (for submenu arrow)
-    GLuint _tri_prog  = 0;
-    GLuint _tri_vao   = 0;
-    GLuint _tri_vbo   = 0;
-    GLint  _tri_u_vp    = -1;
-    GLint  _tri_u_color = -1;
+    // Rounded-rect SDF shader
+    gfx::ShaderHandle  _sh_rb   = 0;
+    gfx::BufferHandle  _quad    = 0;   // static unit quad [0,1]^2
+
+    // Solid-color triangle shader (for submenu arrows and line segments)
+    gfx::ShaderHandle  _sh_tri  = 0;
+    gfx::BufferHandle  _tri_buf = 0;   // dynamic: up to 6 verts
 
     float _vp_w = 800.f, _vp_h = 600.f;
 };

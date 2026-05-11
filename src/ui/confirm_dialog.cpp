@@ -120,8 +120,6 @@ void ConfirmDialog::draw() {
     const float icon_gap= (icon_sz > 0.f) ? std::roundf(4.f * scale) : 0.f;
 
     // 1. Full-screen dim overlay
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     _rb->draw_rect_filled(0.f, 0.f, _vp_w, _vp_h, OVERLAY_COLOR);
 
     // 2. Dialog background + border

@@ -25,9 +25,10 @@ public:
     GLContext(const GLContext&)            = delete;
     GLContext& operator=(const GLContext&) = delete;
 
-    // Create window and initialize OpenGL 3.3 Core context.
-    // Returns false on failure.
-    bool init(int width, int height, const char* title);
+    // Create a GLFW window.
+    // opengl=true  → GL 3.3 Core context hints (default, for GlBackend)
+    // opengl=false → GLFW_CLIENT_API=GLFW_NO_API (required for VkBackend)
+    bool init(int width, int height, const char* title, bool opengl = true);
 
     // Must be called after context is current; initializes GLEW.
     bool init_gl();
@@ -51,8 +52,9 @@ public:
     GLFWwindow* window() const { return _win; }
 
 private:
-    GLFWwindow* _win = nullptr;
-    bool        _glfw_owner = false; // true if we called glfwInit
+    GLFWwindow* _win        = nullptr;
+    bool        _glfw_owner = false;
+    bool        _opengl     = true;
 };
 
 } // namespace bl_ui

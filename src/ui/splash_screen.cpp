@@ -94,9 +94,6 @@ void SplashScreen::_layout() {
 void SplashScreen::draw() {
     if (_closed) return;
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     // Dim overlay
     _rb->draw_rect_filled(0.f, 0.f, _vp_w, _vp_h, RGBA{0, 0, 0, 0x60});
 

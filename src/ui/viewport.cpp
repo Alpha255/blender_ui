@@ -13,8 +13,8 @@ static constexpr float DIST_MIN    = 0.01f;
 static constexpr float DIST_MAX    = 100000.f;
 static constexpr float DOLLY_STEP  = 0.1f;   // distance factor per scroll notch
 
-bool Viewport3D::init() {
-    if (!_grid.init()) {
+bool Viewport3D::init(gfx::Backend& gfx) {
+    if (!_grid.init(gfx)) {
         std::cerr << "[bl_ui] Viewport3D: Grid init failed\n";
         return false;
     }

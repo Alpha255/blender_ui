@@ -1,5 +1,8 @@
 #pragma once
 #include "../render/gl_context.h"
+#include "../render/gfx/backend.h"
+#include "../render/gfx/gl_backend.h"
+#include "../render/gfx/vk_backend.h"
 #include "../render/roundbox.h"
 #include "../render/font.h"
 #include "../render/icon_atlas.h"
@@ -62,7 +65,8 @@ private:
     static void _cb_framebuffer (GLFWwindow*, int w, int h);
     static void _cb_scroll      (GLFWwindow*, double dx, double dy);
 
-    GLContext    _ctx;
+    GLContext                      _ctx;
+    std::unique_ptr<gfx::Backend>  _gfx;
     Roundbox     _rb;
     Font         _font;
     IconAtlas    _icons;

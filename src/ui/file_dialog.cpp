@@ -222,9 +222,6 @@ std::string FileDialog::_format_size(uintmax_t bytes) {
 void FileDialog::draw() {
     if (_closed) return;
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     // Dim everything behind the dialog (25% black overlay)
     _rb->draw_rect_filled(0.f, 0.f, _vp_w, _vp_h, RGBA{0, 0, 0, 0x40});
 

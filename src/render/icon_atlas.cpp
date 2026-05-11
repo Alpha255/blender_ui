@@ -45,30 +45,15 @@ void main(){
 }
 )";
 
-static GLuint compile_prog(const char* vert, const char* frag) {
-    auto compile = [](GLenum type, const char* src) {
-        GLuint s = glCreateShader(type);
-        glShaderSource(s, 1, &src, nullptr);
-        glCompileShader(s);
-        GLint ok; glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-        if (!ok) {
-            char buf[512]; glGetShaderInfoLog(s, sizeof(buf), nullptr, buf);
-            std::cerr << "[IconAtlas] shader error: " << buf << "\n";
-        }
-        return s;
-    };
-    GLuint vs = compile(GL_VERTEX_SHADER, vert);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, frag);
-    GLuint p  = glCreateProgram();
-    glAttachShader(p, vs); glAttachShader(p, fs);
-    glLinkProgram(p);
-    glDeleteShader(vs); glDeleteShader(fs);
-    return p;
-}
+// Vertex layout: (vec2 pos, vec2 uv) — stride 16, two attributes.
+static const gfx::VertexAttr ATTRS[] = {
+    {0, 2, 0},   // aPos
+    {1, 2, 8},   // aUV
+};
+static const gfx::VertexLayout LAYOUT = { ATTRS, 2, 4 * sizeof(float) };
 
 // ---------------------------------------------------------------------------
-// Mapping: icon_id → SVG file stem
-// Only the icons we actually expose in bl_ui/icons.h.
+// Icon ID → SVG file stem mapping
 // ---------------------------------------------------------------------------
 
 const char* IconAtlas::_svg_stem(int id) {
@@ -93,10 +78,10 @@ const char* IconAtlas::_svg_stem(int id) {
         case ICON_WINDOW:            return "window";
         case ICON_HELP:              return "help";
         case ICON_URL:               return "url";
-        case ICON_TRANSFORM_MOVE:   return "transform_move";
-        case ICON_TRANSFORM_ROTATE: return "transform_rotate";
-        case ICON_TRANSFORM_SCALE:  return "transform_scale";
-        case ICON_TRANSFORM_ALL:    return "transform_all";
+        case ICON_TRANSFORM_MOVE:    return "transform_move";
+        case ICON_TRANSFORM_ROTATE:  return "transform_rotate";
+        case ICON_TRANSFORM_SCALE:   return "transform_scale";
+        case ICON_TRANSFORM_ALL:     return "transform_all";
         default:                     return nullptr;
     }
 }
@@ -105,42 +90,32 @@ const char* IconAtlas::_svg_stem(int id) {
 // init
 // ---------------------------------------------------------------------------
 
-bool IconAtlas::init(const std::string& svg_dir, float icon_px, float content_scale) {
+bool IconAtlas::init(gfx::Backend& gfx, const std::string& svg_dir,
+                     float icon_px, float content_scale) {
+    _gfx           = &gfx;
     _svg_dir       = svg_dir;
     _icon_px       = icon_px;
     _content_scale = content_scale;
     _phys_px       = static_cast<int>(std::ceil(icon_px * content_scale));
 
-    // Atlas texture dimensions: COLS columns, enough rows for MAX_ICONS
-    int rows    = (MAX_ICONS + COLS - 1) / COLS;
-    _atlas_w    = COLS * _phys_px;
-    _atlas_h    = rows * _phys_px;
-    _atlas_px.assign(static_cast<size_t>(_atlas_w) * _atlas_h * 4, 0);
+    int rows = (MAX_ICONS + COLS - 1) / COLS;
+    _atlas_w = COLS * _phys_px;
+    _atlas_h = rows * _phys_px;
+    _atlas_px.assign((size_t)_atlas_w * _atlas_h * 4, 0);
 
-    // GL texture (upload will happen lazily per icon)
-    glGenTextures(1, &_tex);
-    glBindTexture(GL_TEXTURE_2D, _tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
-                 _atlas_w, _atlas_h, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, _atlas_px.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Allocate the GPU texture (filled lazily per icon).
+    _tex = gfx.create_texture(_atlas_w, _atlas_h,
+                               gfx::PixelFormat::RGBA8,
+                               gfx::FilterMode::Linear,
+                               _atlas_px.data());
+    if (!_tex) return false;
 
-    // VAO/VBO for a unit quad (6 verts, position+UV)
-    glGenVertexArrays(1, &_vao);
-    glGenBuffers(1, &_vbo);
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, 6 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-    glBindVertexArray(0);
+    // Dynamic VBO: up to VBO_CAPACITY verts (256 icons × 6 verts × vec4).
+    _vbo = gfx.create_buffer(nullptr, (size_t)VBO_CAPACITY * 4 * sizeof(float), true);
+    if (!_vbo) return false;
 
-    _prog = compile_prog(VERT_SRC, FRAG_SRC);
-    return _prog != 0;
+    _sh = gfx.create_shader(VERT_SRC, FRAG_SRC);
+    return _sh != 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +123,6 @@ bool IconAtlas::init(const std::string& svg_dir, float icon_px, float content_sc
 // ---------------------------------------------------------------------------
 
 bool IconAtlas::_rasterise(int icon_id, const std::string& svg_path, int slot) {
-    // Parse
     NSVGimage* img = nsvgParseFromFile(svg_path.c_str(), "px", 96.f);
     if (!img) {
         std::cerr << "[IconAtlas] nsvgParseFromFile failed: " << svg_path << "\n";
@@ -156,56 +130,41 @@ bool IconAtlas::_rasterise(int icon_id, const std::string& svg_path, int slot) {
     }
 
     NSVGrasterizer* rast = nsvgCreateRasterizer();
+    int   phys  = _phys_px;
+    float scale = (img->width > 0.f) ? float(phys) / img->width : 1.f;
 
-    // Rasterise at physical pixel size
-    int    phys  = _phys_px;
-    float  scale = (img->width > 0.f) ? float(phys) / img->width : 1.f;
-    std::vector<unsigned char> tmp(phys * phys * 4, 0);
-    nsvgRasterize(rast, img, 0.f, 0.f, scale, tmp.data(), phys, phys, phys * 4);
-
+    std::vector<unsigned char> raw(phys * phys * 4, 0);
+    nsvgRasterize(rast, img, 0.f, 0.f, scale, raw.data(), phys, phys, phys * 4);
     nsvgDeleteRasterizer(rast);
     nsvgDelete(img);
 
-    // Copy pixels into atlas CPU buffer (with proper atlas row stride).
-    int ax = (slot % COLS) * phys;
-    int ay = (slot / COLS) * phys;
-    for (int row = 0; row < phys; ++row) {
-        unsigned char* dst = _atlas_px.data() + ((ay + row) * _atlas_w + ax) * 4;
-        const unsigned char* src = tmp.data() + row * phys * 4;
-        // Icons are filled with #fff (white) — use alpha channel as the coverage mask.
-        // The shader applies the tint colour; RGB in the atlas is always 255.
-        for (int col = 0; col < phys; ++col) {
-            dst[col * 4 + 0] = 255;
-            dst[col * 4 + 1] = 255;
-            dst[col * 4 + 2] = 255;
-            dst[col * 4 + 3] = src[col * 4 + 3];
-        }
+    // Convert to alpha-only (white fill, alpha = coverage mask) in a
+    // tightly-packed temp buffer — avoids row-stride complications when
+    // uploading the sub-region via update_texture().
+    std::vector<unsigned char> processed(phys * phys * 4);
+    for (int i = 0; i < phys * phys; ++i) {
+        processed[i * 4 + 0] = 255;
+        processed[i * 4 + 1] = 255;
+        processed[i * 4 + 2] = 255;
+        processed[i * 4 + 3] = raw[i * 4 + 3];
     }
 
-    // Upload to GPU.
-    // GL_UNPACK_ROW_LENGTH must match the atlas CPU buffer width so that OpenGL
-    // reads the correct row stride (atlas_w px) rather than the sub-image width (phys px).
-    glBindTexture(GL_TEXTURE_2D, _tex);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, _atlas_w);
-    glTexSubImage2D(GL_TEXTURE_2D, 0,
-                    ax, ay, phys, phys,
-                    GL_RGBA, GL_UNSIGNED_BYTE,
-                    _atlas_px.data() + (ay * _atlas_w + ax) * 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);  // restore default
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Upload sub-region (tightly packed, so no row-stride issues).
+    int ax = (slot % COLS) * phys;
+    int ay = (slot / COLS) * phys;
+    _gfx->update_texture(_tex, ax, ay, phys, phys, processed.data());
 
-    // Register UV coords
-    float u0 = float(ax)         / _atlas_w;
-    float v0 = float(ay)         / _atlas_h;
-    float u1 = float(ax + phys)  / _atlas_w;
-    float v1 = float(ay + phys)  / _atlas_h;
-    _cells[icon_id] = {u0, v0, u1, v1, true};
+    float u0 = float(ax)        / _atlas_w;
+    float v0 = float(ay)        / _atlas_h;
+    float u1 = float(ax + phys) / _atlas_w;
+    float v1 = float(ay + phys) / _atlas_h;
+    _cells[icon_id] = { u0, v0, u1, v1, true };
 
     return true;
 }
 
 // ---------------------------------------------------------------------------
-// _load_icon: on-demand load for a given icon_id
+// _load_icon
 // ---------------------------------------------------------------------------
 
 bool IconAtlas::_load_icon(int icon_id) {
@@ -231,10 +190,12 @@ void IconAtlas::draw_icon(int icon_id, float x, float y, RGBA tint) {
     if (!_load_icon(icon_id)) return;
 
     const Cell& c = _cells[icon_id];
-    float w = _icon_px;
-    float h = _icon_px;
+    float w = _icon_px, h = _icon_px;
 
-    // 6 vertices: position (x,y) + UV
+    if (_vbo_vertex_top + 6 > VBO_CAPACITY) _vbo_vertex_top = 0;
+    int first_vertex = _vbo_vertex_top;
+    _vbo_vertex_top += 6;
+
     float verts[6][4] = {
         {x,     y,     c.u0, c.v0},
         {x + w, y,     c.u1, c.v0},
@@ -243,38 +204,15 @@ void IconAtlas::draw_icon(int icon_id, float x, float y, RGBA tint) {
         {x + w, y + h, c.u1, c.v1},
         {x,     y + h, c.u0, c.v1},
     };
+    size_t byte_offset = (size_t)first_vertex * 4 * sizeof(float);
+    _gfx->update_buffer(_vbo, verts, sizeof(verts), byte_offset);
 
-    glUseProgram(_prog);
-    glUniform2f(glGetUniformLocation(_prog, "uVP"), _vp_w, _vp_h);
-    glUniform4f(glGetUniformLocation(_prog, "uTint"),
-                tint.rf(), tint.gf(), tint.bf(), tint.af());
-    glUniform1i(glGetUniformLocation(_prog, "uTex"), 0);
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, _tex);
-
-    glBindVertexArray(_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
-
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-
-    glBindVertexArray(0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
-}
-
-// ---------------------------------------------------------------------------
-// Destructor
-// ---------------------------------------------------------------------------
-
-IconAtlas::~IconAtlas() {
-    if (_tex)  { glDeleteTextures(1, &_tex);      _tex  = 0; }
-    if (_vao)  { glDeleteVertexArrays(1, &_vao);  _vao  = 0; }
-    if (_vbo)  { glDeleteBuffers(1, &_vbo);        _vbo  = 0; }
-    if (_prog) { glDeleteProgram(_prog);           _prog = 0; }
+    _gfx->set_blend_alpha(true);
+    _gfx->use_shader(_sh);
+    _gfx->uniform_2f("uVP",  _vp_w, _vp_h);
+    _gfx->uniform_4f("uTint", tint.rf(), tint.gf(), tint.bf(), tint.af());
+    _gfx->bind_texture(0, _tex, "uTex");
+    _gfx->draw_triangles(_vbo, LAYOUT, first_vertex, 6);
 }
 
 } // namespace bl_ui
