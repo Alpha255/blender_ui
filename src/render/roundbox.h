@@ -55,16 +55,22 @@ public:
     void draw_line_segment(float x0, float y0, float x1, float y1,
                            float width, RGBA color);
 
+    // Draw a checkmark (tick) inside the bounding box (x,y,w,h).
+    // Geometry matches Blender's g_shape_preset_checkmark_vert.
+    // Source ref: source/blender/editors/interface/interface_widgets.cc:947
+    void draw_checkmark(float x, float y, float w, float h, RGBA color);
+
 private:
-    gfx::Backend*      _gfx     = nullptr;
+    gfx::Backend*      _gfx       = nullptr;
 
     // Rounded-rect SDF shader
-    gfx::ShaderHandle  _sh_rb   = 0;
-    gfx::BufferHandle  _quad    = 0;   // static unit quad [0,1]^2
+    gfx::ShaderHandle  _sh_rb     = 0;
+    gfx::BufferHandle  _quad      = 0;   // static unit quad [0,1]^2
 
-    // Solid-color triangle shader (for submenu arrows and line segments)
-    gfx::ShaderHandle  _sh_tri  = 0;
-    gfx::BufferHandle  _tri_buf = 0;   // dynamic: up to 6 verts
+    // Solid-color triangle shader (for submenu arrows, line segments, checkmarks)
+    gfx::ShaderHandle  _sh_tri    = 0;
+    gfx::BufferHandle  _tri_buf   = 0;   // dynamic: up to 6 verts
+    gfx::BufferHandle  _check_buf = 0;   // dynamic: 12 verts (4 triangles for checkmark)
 
     float _vp_w = 800.f, _vp_h = 600.f;
 };

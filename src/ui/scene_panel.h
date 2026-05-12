@@ -1,6 +1,7 @@
 #pragma once
 #include "../render/roundbox.h"
 #include "../render/font.h"
+#include "checkbox.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -79,8 +80,18 @@ private:
     std::unique_ptr<SceneNode> _root;
     std::vector<FlatItem>      _flat;  // rebuilt every frame
 
-    int _hov_item = -1;
-    int _sel_item = -1;
+    int   _hov_item = -1;
+    int   _sel_item = -1;
+    float _mx       = -1.f;  // last known cursor position (for Checkbox hover)
+    float _my       = -1.f;
+
+    // --- Viewport Overlays sub-section at the bottom of the panel ---
+    Checkbox _overlays;
+    bool     _overlays_open = true;   // collapsed state
+    bool     _ov_hdr_hov    = false;  // header hover
+
+    // Total pixel height the overlays section occupies (header + items when open).
+    float _overlays_section_h() const;
 
     Roundbox* _rb   = nullptr;
     Font*     _font = nullptr;

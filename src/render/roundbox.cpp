@@ -123,7 +123,11 @@ bool Roundbox::init(gfx::Backend& gfx) {
 
     // Dynamic buffer: up to 6 vertices for triangles / line segments.
     _tri_buf = gfx.create_buffer(nullptr, 6 * 2 * sizeof(float), true);
-    return _tri_buf != 0;
+    if (!_tri_buf) return false;
+
+    // Dynamic buffer: 12 vertices (4 triangles) for the checkmark shape.
+    _check_buf = gfx.create_buffer(nullptr, 12 * 2 * sizeof(float), true);
+    return _check_buf != 0;
 }
 
 void Roundbox::set_viewport(float width, float height) {
@@ -200,6 +204,64 @@ void Roundbox::draw_line_segment(float x0, float y0, float x1, float y1,
     _gfx->uniform_2f("uViewport", _vp_w, _vp_h);
     _gfx->uniform_4f("uColor", color.rf(), color.gf(), color.bf(), color.af());
     _gfx->draw_triangles(_tri_buf, LAYOUT_POS2, 0, 6);
+}
+
+// ---------------------------------------------------------------------------
+// draw_checkmark — tick mark geometry from Blender's g_shape_preset_checkmark_vert.
+// Source ref: source/blender/editors/interface/interface_widgets.cc:370-377
+//
+// Vertex space: normalized ~[-0.58, 1.06] × [-0.33, 1.03].
+// Blender places center at (cx, cy) = rect_center with cy shifted down 5%,
+// then scales by 0.4 * min(w, h).  We apply a y-flip when converting to
+// screen space (y=0 top, increasing down).
+// ---------------------------------------------------------------------------
+
+void Roundbox::draw_checkmark(float x, float y, float w, float h, RGBA color) {
+    // Blender's normalized checkmark vertices.
+    static const float verts[6][2] = {
+        {-0.578579f,  0.253369f},
+        {-0.392773f,  0.412794f},
+        {-0.004241f, -0.328551f},
+        {-0.003001f,  0.034320f},
+        { 1.055313f,  0.864744f},
+        { 0.866408f,  1.026895f},
+    };
+    // Face indices (4 triangles).
+    static const int faces[4][3] = {
+        {3, 2, 4},
+        {3, 4, 5},
+        {1, 0, 3},
+        {0, 2, 3},
+    };
+
+    // Center + scale matching shape_preset_trias_from_rect_checkmark().
+    float cx = x + 0.5f * w;
+    float cy = y + 0.5f * h + 0.05f * h;  // slight downward shift (Blender: y -= 0.05*h)
+    float s  = 0.4f * std::min(w, h);
+
+    // Build screen-space vertex positions: flip y axis for screen coordinates.
+    float sv[6][2];
+    for (int i = 0; i < 6; i++) {
+        sv[i][0] = cx + s * verts[i][0];
+        sv[i][1] = cy - s * verts[i][1];
+    }
+
+    // Unroll 4 faces into 12 flat vertices for the GPU buffer.
+    float buf[12][2];
+    for (int f = 0; f < 4; f++) {
+        for (int v = 0; v < 3; v++) {
+            int vi = faces[f][v];
+            buf[f * 3 + v][0] = sv[vi][0];
+            buf[f * 3 + v][1] = sv[vi][1];
+        }
+    }
+
+    _gfx->update_buffer(_check_buf, buf, sizeof(buf));
+    _gfx->set_blend_alpha(true);
+    _gfx->use_shader(_sh_tri);
+    _gfx->uniform_2f("uViewport", _vp_w, _vp_h);
+    _gfx->uniform_4f("uColor", color.rf(), color.gf(), color.bf(), color.af());
+    _gfx->draw_triangles(_check_buf, LAYOUT_POS2, 0, 12);
 }
 
 } // namespace bl_ui

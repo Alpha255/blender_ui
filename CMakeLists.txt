@@ -77,6 +77,7 @@ set(BL_UI_SOURCES
     src/ui/splash_screen.cpp
     src/ui/toolbar.cpp
     src/ui/scene_panel.cpp
+    src/ui/checkbox.cpp
     src/ui/app.cpp
 )
 

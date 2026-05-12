@@ -46,6 +46,13 @@ float ScenePanel::_panel_header_h() {
     return std::roundf(Theme::ITEM_HEIGHT + 4.f * Theme::UI_SCALE);
 }
 
+float ScenePanel::_overlays_section_h() const {
+    float phdr = std::roundf(Theme::ITEM_HEIGHT + 4.f * Theme::UI_SCALE);
+    float ih   = std::roundf(Theme::ITEM_HEIGHT);
+    int   n    = static_cast<int>(_overlays.items().size());
+    return phdr + (_overlays_open ? n * ih : 0.f);
+}
+
 // ---------------------------------------------------------------------------
 // Construction / setup
 // ---------------------------------------------------------------------------
@@ -57,6 +64,15 @@ ScenePanel::ScenePanel() {
 void ScenePanel::set_dependencies(Roundbox* rb, Font* font) {
     _rb   = rb;
     _font = font;
+
+    _overlays.set_dependencies(rb, font);
+    _overlays.items() = {
+        {"Show Overlays",  true },
+        {"Show Gizmos",    true },
+        {"Show Floor",     true },
+        {"Show Axes",      false},
+        {"Show Statistics",false},
+    };
 }
 
 void ScenePanel::set_viewport(float w, float h) {
@@ -126,15 +142,19 @@ void ScenePanel::draw(float header_h) {
     _flatten(_root.get(), 0, cy);
     _content_h = cy - (_py + phdr);
 
-    // Clamp scroll
-    float max_scroll = std::max(0.f, _content_h - (_ph - phdr));
+    // Overlays sub-section reserves space at the bottom.
+    float ov_h = _overlays_section_h();
+
+    // Clamp scroll so tree items don't scroll into the overlays band.
+    float tree_area_h = _ph - phdr - ov_h - 1.f;  // -1 for separator
+    float max_scroll  = std::max(0.f, _content_h - tree_area_h);
     _scroll = std::clamp(_scroll, 0.f, max_scroll);
 
     // --- Panel background ---
     _rb->draw_roundbox(_px, _py, _pw, _ph,
                        MENU_RADIUS, COL_PANEL_BG, COL_PANEL_BDR, 1.f);
 
-    // --- Header strip ---
+    // --- Header strip (Scene Collection) ---
     _rb->draw_roundbox(_px, _py, _pw, phdr,
                        MENU_RADIUS, COL_HDR_BG, RGBA{0,0,0,0}, 0.f);
 
@@ -148,15 +168,55 @@ void ScenePanel::draw(float header_h) {
     // Separator under header
     _rb->draw_line_h(_px, _py + phdr, _pw, COL_SEP);
 
-    // --- Item rows ---
+    // --- Item rows (tree, clipped above the overlays band) ---
     float clip_top    = _py + phdr;
-    float clip_bottom = _py + _ph;
+    float clip_bottom = _py + _ph - ov_h - 1.f;
 
     for (int i = 0; i < static_cast<int>(_flat.size()); ++i) {
         float iy = _flat[i].y0 - _scroll;
-        if (iy + ih <= clip_top)    continue;
+        if (iy + ih <= clip_top)     continue;
         if (iy       >= clip_bottom) break;
         _draw_item(i, _hov_item == i, _sel_item == i);
+    }
+
+    // Separator above overlays section
+    float ov_top = _py + _ph - ov_h;
+    _rb->draw_line_h(_px, ov_top, _pw, COL_SEP);
+
+    // --- Viewport Overlays section header ---
+    float ov_hdr_y = ov_top;
+    RGBA  ov_hdr_bg = _ov_hdr_hov
+                    ? RGBA{50, 50, 50, 255}
+                    : COL_HDR_BG;
+    _rb->draw_rect_filled(_px, ov_hdr_y, _pw, phdr, ov_hdr_bg);
+
+    // Collapse arrow
+    float asz  = std::roundf(5.f * UI_SCALE);
+    float acx  = _px + std::roundf(10.f * UI_SCALE);
+    float acy  = ov_hdr_y + phdr * 0.5f;
+    float lw   = std::max(1.f, 1.2f * UI_SCALE);
+    if (_overlays_open) {
+        _rb->draw_line_segment(acx - asz * 0.55f, acy - asz * 0.35f,
+                               acx,               acy + asz * 0.4f,  lw, COL_ARROW);
+        _rb->draw_line_segment(acx,               acy + asz * 0.4f,
+                               acx + asz * 0.55f, acy - asz * 0.35f, lw, COL_ARROW);
+    } else {
+        _rb->draw_triangle_right(acx - asz * 0.35f, acy - asz * 0.5f,
+                                 asz * 0.65f, asz, COL_ARROW);
+    }
+
+    if (_font) {
+        float th = _font->line_height();
+        float tx = _px + std::roundf(20.f * UI_SCALE);
+        float ty = ov_hdr_y + (phdr - th) * 0.5f;
+        _font->draw_text("Viewport Overlays", tx, ty, COL_HDR_TEXT);
+    }
+
+    // --- Checkbox items ---
+    if (_overlays_open) {
+        float pad_x = std::roundf(8.f * UI_SCALE);
+        _overlays.set_viewport(_vp_w, _vp_h);
+        _overlays.draw(_px + pad_x, ov_hdr_y + phdr, _mx, _my);
     }
 }
 
@@ -247,10 +307,14 @@ void ScenePanel::_draw_item(int idx, bool hovered, bool selected) {
 // ---------------------------------------------------------------------------
 
 bool ScenePanel::handle_mouse(float mx, float my, bool pressed, bool /*released*/) {
+    _mx = mx;
+    _my = my;
+
     bool over = (mx >= _px && mx < _px + _pw &&
                  my >= _py && my < _py + _ph);
 
-    _hov_item = -1;
+    _hov_item    = -1;
+    _ov_hdr_hov  = false;
     if (!over) return false;
 
     float ih = std::roundf(Theme::ITEM_HEIGHT);
@@ -263,27 +327,56 @@ bool ScenePanel::handle_mouse(float mx, float my, bool pressed, bool /*released*
         }
     }
 
-    if (pressed && _hov_item >= 0) {
-        FlatItem& fi  = _flat[_hov_item];
-        float indent  = std::roundf(14.f * Theme::UI_SCALE);
-        float arrow_x = _px + std::roundf(4.f * Theme::UI_SCALE) + fi.depth * indent;
-        float arrow_end = arrow_x + std::roundf(13.f * Theme::UI_SCALE);
-        float iy      = fi.y0 - _scroll;
-        float ih_     = std::roundf(Theme::ITEM_HEIGHT);
+    // Determine overlays section geometry (mirrors draw()).
+    float phdr  = _panel_header_h();
+    float ov_h  = _overlays_section_h();
+    float ov_top = _py + _ph - ov_h;
 
-        if (mx < arrow_end && !fi.node->children.empty()) {
-            // Toggle expand / collapse
-            fi.node->expanded = !fi.node->expanded;
-        } else {
-            // Check eye icon hit
-            float esz = std::roundf(8.f * Theme::UI_SCALE);
-            float ecx = _px + _pw - std::roundf(11.f * Theme::UI_SCALE);
-            float ecy = iy + ih_ * 0.5f;
-            if (mx >= ecx - esz && mx <= ecx + esz &&
-                my >= ecy - esz && my <= ecy + esz) {
-                fi.node->visible = !fi.node->visible;
+    // Hover state for the overlays header strip.
+    _ov_hdr_hov = (my >= ov_top && my < ov_top + phdr);
+
+    // Mouse is in the tree area only if above the overlays section.
+    bool in_tree = (my < ov_top);
+
+    if (in_tree) {
+        float ih = std::roundf(Theme::ITEM_HEIGHT);
+        for (int i = 0; i < static_cast<int>(_flat.size()); ++i) {
+            float iy = _flat[i].y0 - _scroll;
+            if (my >= iy && my < iy + ih) {
+                _hov_item = i;
+                break;
+            }
+        }
+    }
+
+    if (pressed) {
+        if (_ov_hdr_hov) {
+            // Toggle the overlays sub-section open/closed.
+            _overlays_open = !_overlays_open;
+        } else if (_overlays_open &&
+                   my >= ov_top + phdr && my < _py + _ph) {
+            // Forward click into the checkbox items.
+            _overlays.handle_mouse(mx, my, true);
+        } else if (in_tree && _hov_item >= 0) {
+            FlatItem& fi    = _flat[_hov_item];
+            float indent    = std::roundf(14.f * Theme::UI_SCALE);
+            float arrow_x   = _px + std::roundf(4.f * Theme::UI_SCALE) + fi.depth * indent;
+            float arrow_end = arrow_x + std::roundf(13.f * Theme::UI_SCALE);
+            float iy        = fi.y0 - _scroll;
+            float ih_       = std::roundf(Theme::ITEM_HEIGHT);
+
+            if (mx < arrow_end && !fi.node->children.empty()) {
+                fi.node->expanded = !fi.node->expanded;
             } else {
-                _sel_item = _hov_item;
+                float esz = std::roundf(8.f * Theme::UI_SCALE);
+                float ecx = _px + _pw - std::roundf(11.f * Theme::UI_SCALE);
+                float ecy = iy + ih_ * 0.5f;
+                if (mx >= ecx - esz && mx <= ecx + esz &&
+                    my >= ecy - esz && my <= ecy + esz) {
+                    fi.node->visible = !fi.node->visible;
+                } else {
+                    _sel_item = _hov_item;
+                }
             }
         }
     }
