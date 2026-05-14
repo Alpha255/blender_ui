@@ -37,9 +37,45 @@ PopupMenu::PopupMenu(MenuType*      mt,
     _position(vp_w, vp_h);
 }
 
-// Shorthand to get items from the owned menu
 const std::vector<LayoutItem>& PopupMenu::_items() const {
     return _menu.layout.items();
+}
+
+// ---------------------------------------------------------------------------
+// Clip text to max_w pixels, inserting "..." in the middle when needed.
+// Mirrors Blender's text_clip_middle_ex().
+// ---------------------------------------------------------------------------
+
+static std::string clip_text_middle(Font* font, const std::string& text, float max_w) {
+    if (font->measure_text(text) <= max_w) return text;
+
+    const std::string ellipsis = "...";
+    float ell_w = font->measure_text(ellipsis);
+    if (ell_w >= max_w) return ellipsis;
+
+    float avail = max_w - ell_w;
+    float half  = avail * 0.5f;
+
+    // Find how many chars fit in the left half and right half.
+    std::size_t left = 0;
+    float acc = 0.f;
+    while (left < text.size()) {
+        float cw = font->measure_text(text.substr(left, 1));
+        if (acc + cw > half) break;
+        acc += cw;
+        ++left;
+    }
+
+    std::size_t right = text.size();
+    acc = 0.f;
+    while (right > left) {
+        float cw = font->measure_text(text.substr(right - 1, 1));
+        if (acc + cw > half) break;
+        acc += cw;
+        --right;
+    }
+
+    return text.substr(0, left) + ellipsis + text.substr(right);
 }
 
 // ---------------------------------------------------------------------------
@@ -48,31 +84,33 @@ const std::vector<LayoutItem>& PopupMenu::_items() const {
 
 void PopupMenu::_measure() {
     const auto& items = _items();
+
+    // Blender: padding = 0.25f * row_height (draw_menu_item, line 6171).
+    // Icon column = row_height (one full widget_unit wide).
+    const float padding  = 0.25f * ITEM_HEIGHT;
+    const float icon_col = (_icons && _icons->ready()) ? ITEM_HEIGHT : 0.f;
+
     float max_w = std::roundf(160.f * UI_SCALE);
 
-    const float icon_w = (_icons && _icons->ready()) ? (_icons->icon_size() + 4.f) : 0.f;
-
-    // widget_draw_submenu_tria: ICON_DEFAULT_HEIGHT(16) scaled by 0.4 → 6.4px.
-    // UI_MENU_SUBMENU_PADDING (= ARROW_PAD_R = 6px) reserves the right-side space for it.
     for (const auto& item : items) {
         float text_w = 0.f;
         std::visit([&](auto&& it) {
             using Tp = std::decay_t<decltype(it)>;
             if constexpr (std::is_same_v<Tp, OperatorItem>) {
-                float icon_extra = (it.icon_id != 0) ? icon_w : 0.f;
-                float label_w = _font->measure_text(it.text.empty() ? it.idname : it.text);
-                float sc_w = it.shortcut.empty() ? 0.f
-                             : _font->measure_text(it.shortcut) + ITEM_PAD_X;
-                text_w = ITEM_PAD_X + icon_extra + label_w + sc_w + ITEM_PAD_X;
+                float has_icon = (it.icon_id != 0) ? icon_col : 0.f;
+                float label_w  = _font->measure_text(it.text.empty() ? it.idname : it.text);
+                float sc_w     = it.shortcut.empty() ? 0.f
+                                 : _font->measure_text(it.shortcut) + ITEM_PAD_X;
+                // left: padding + icon_col + label; right: sc_w + padding
+                text_w = padding + has_icon + label_w + sc_w + padding;
             } else if constexpr (std::is_same_v<Tp, MenuRefItem>) {
-                float icon_extra = (it.icon_id != 0) ? icon_w : 0.f;
+                float has_icon = (it.icon_id != 0) ? icon_col : 0.f;
                 std::string label = it.text.empty() ? it.menu_idname : it.text;
-                // Right side: ARROW_PAD_R (= UI_MENU_SUBMENU_PADDING = 6px) + ITEM_PAD_X.
-                // The 6.4px arrow fits within that margin.
-                text_w = ITEM_PAD_X + icon_extra + _font->measure_text(label)
-                         + ARROW_PAD_R + ITEM_PAD_X;
+                // right: ARROW_PAD_R (submenu triangle space) + padding
+                text_w = padding + has_icon + _font->measure_text(label)
+                         + ARROW_PAD_R + padding;
             } else if constexpr (std::is_same_v<Tp, LabelItem>) {
-                text_w = _font->measure_text(it.text) + ITEM_PAD_X * 2;
+                text_w = padding + _font->measure_text(it.text) + padding;
             }
         }, item);
         max_w = std::max(max_w, text_w);
@@ -83,7 +121,7 @@ void PopupMenu::_measure() {
     _item_rects.clear();
 
     for (std::size_t i = 0; i < items.size(); ++i) {
-        float row_h = ITEM_HEIGHT;
+        float row_h   = ITEM_HEIGHT;
         bool clickable = false;
 
         std::visit([&](auto&& it) {
@@ -99,7 +137,8 @@ void PopupMenu::_measure() {
         _item_rects.push_back({i, total_h, total_h + row_h, clickable});
         total_h += row_h;
     }
-    _h = total_h + std::roundf(4.f * UI_SCALE); // 2px padding top + bottom
+    // 2px padding top + 2px padding bottom (Blender: UI_MENU_PADDING).
+    _h = total_h + std::roundf(4.f * UI_SCALE);
 }
 
 // ---------------------------------------------------------------------------
@@ -114,108 +153,158 @@ void PopupMenu::_position(float vp_w, float vp_h) {
 }
 
 // ---------------------------------------------------------------------------
-// Draw
+// Draw a single menu item.
+// Mirrors Blender's draw_menu_item() in interface_widgets.cc.
 // ---------------------------------------------------------------------------
 
 void PopupMenu::_draw_item(const ItemRect& ir, bool hovered) {
     const auto& items = _items();
     const LayoutItem& item = items[ir.item_idx];
-    float iy = _y + ir.y0 + std::roundf(2.f * UI_SCALE); // 2px top padding
+
+    // Top padding: 2px (Blender: UI_MENU_PADDING / 2).
+    const float pad_top  = std::roundf(2.f * UI_SCALE);
+    const float iy       = _y + ir.y0 + pad_top;
+
+    // Blender: padding = 0.25f * row_height (draw_menu_item, line 6171).
+    const float padding  = 0.25f * ITEM_HEIGHT;
+
+    // Highlight rect inset: widget_menu_itembut pads by 0.125 * widget_unit each side.
+    const float hi_pad   = std::roundf(0.125f * ITEM_HEIGHT);
 
     std::visit([&](auto&& it) {
         using Tp = std::decay_t<decltype(it)>;
 
         if constexpr (std::is_same_v<Tp, SeparatorItem>) {
+            // Blender draws a 1px line at vertical center of the separator row.
             float mid = iy + SEP_HEIGHT * 0.5f;
             _rb->draw_line_h(_x + 4.f, mid, _w - 8.f, SEP_COLOR);
 
         } else if constexpr (std::is_same_v<Tp, LabelItem>) {
             _font->draw_text(it.text,
-                             _x + ITEM_PAD_X,
+                             _x + padding,
                              iy + (ITEM_HEIGHT - _font->line_height()) * 0.5f,
                              ITEM_TEXT_DIM);
 
         } else if constexpr (std::is_same_v<Tp, OperatorItem>) {
-            // widget_pulldownbut: only draws inner when UI_HOVER; uses wcol_pulldown.
-            // inner_sel = {0xFF,0xFF,0xFF,0x1A} (HEADER_HOVER, 10% white).
+            // Background highlight — widget_menu_itembut with 0.125 * wu inset.
             if (hovered) {
-                _rb->draw_roundbox(_x + 2.f, iy, _w - 4.f, ITEM_HEIGHT,
-                                   MENU_RADIUS, HEADER_HOVER);
+                _rb->draw_roundbox(_x + hi_pad, iy, _w - 2.f * hi_pad, ITEM_HEIGHT,
+                                   MENU_RADIUS, ITEM_HOVER);
             }
-            // wcol_pulldown: text={0xD9,0xD9,0xD9}=HEADER_TEXT, text_sel=white.
-            RGBA tc = hovered ? ITEM_TEXT_SEL : HEADER_TEXT;
-            float tx = _x + ITEM_PAD_X;
+
+            // Text color: wcol_menu_item.text / text_sel.
+            RGBA tc = hovered ? ITEM_TEXT_SEL : ITEM_TEXT;
+
+            // Icon drawn at: xmin + 0.2 * UI_UNIT_X * zoom
+            // (UI_UNIT_X = widget_unit = ITEM_HEIGHT in our system, zoom = 1.0).
+            // draw_menu_item line 6253-6261.
+            float tx = _x + padding;  // text start (no icon)
             if (_icons && _icons->ready() && it.icon_id != 0) {
-                float isz = _icons->icon_size();
-                float iy_icon = iy + (ITEM_HEIGHT - isz) * 0.5f;
-                _icons->draw_icon(it.icon_id, tx, iy_icon, tc);
-                tx += isz + 4.f;
+                float icon_sz = _icons->icon_size();
+                float ix = std::roundf(_x + 0.2f * ITEM_HEIGHT);
+                float iy_icon = std::roundf(iy + 0.5f * (ITEM_HEIGHT - icon_sz));
+                _icons->draw_icon(it.icon_id, ix, iy_icon, tc);
+                // Text starts after the full icon column (ITEM_HEIGHT wide).
+                tx = _x + padding + ITEM_HEIGHT;
             }
+
             float ty = iy + (ITEM_HEIGHT - _font->line_height()) * 0.5f;
-            std::string_view label = it.text.empty() ? it.idname : it.text;
+
+            // Shortcut right-aligned (stored in it.shortcut, right of UI_SEP_CHAR).
+            // Blender renders it grayed out (BUT_INACTIVE = 50% alpha).
+            float sc_w = 0.f;
+            if (!it.shortcut.empty()) {
+                sc_w = _font->measure_text(it.shortcut) + ITEM_PAD_X;
+            }
+
+            // Available width for the label (shrink right end by shortcut + padding).
+            float text_max_w = _w - (tx - _x) - sc_w - padding;
+            std::string label = it.text.empty() ? it.idname : it.text;
+            label = clip_text_middle(_font, label, text_max_w);
             _font->draw_text(label, tx, ty, tc);
+
+            // Mnemonic underline.
             if (it.mnemonic != 0) {
                 auto mpos = label.find(it.mnemonic);
-                if (mpos != std::string_view::npos) {
+                if (mpos != std::string::npos) {
                     float bw = _font->measure_text(label.substr(0, mpos));
                     float cw = _font->measure_text(label.substr(mpos, 1));
                     float ul_y = ty + _font->ascent() + 1.f;
                     _rb->draw_line_h(tx + bw, ul_y, cw, tc);
                 }
             }
-            // Shortcut: widget_draw_text_icon uses wcol->text * 0.5 alpha as hint.
-            // On hover wcol->text becomes text_sel, so shortcut brightens too.
+
+            // Shortcut at right edge, 50% alpha (Blender: BUT_INACTIVE → alpha * 0.5).
             if (!it.shortcut.empty()) {
-                float sc_x = _x + _w - ITEM_PAD_X - _font->measure_text(it.shortcut);
+                float sc_x = _x + _w - padding - _font->measure_text(it.shortcut);
                 RGBA sc_c{tc.r, tc.g, tc.b, (unsigned char)(tc.a * 0.5f)};
                 _font->draw_text(it.shortcut, sc_x, ty, sc_c);
             }
 
         } else if constexpr (std::is_same_v<Tp, MenuRefItem>) {
-            // Same widget_pulldownbut / wcol_pulldown as OperatorItem — all popup
-            // items use wcol_pulldown regardless of whether they open a submenu.
+            // Same widget as OperatorItem — wcol_menu_item (popup context).
             if (hovered) {
-                _rb->draw_roundbox(_x + 2.f, iy, _w - 4.f, ITEM_HEIGHT,
-                                   MENU_RADIUS, HEADER_HOVER);
+                _rb->draw_roundbox(_x + hi_pad, iy, _w - 2.f * hi_pad, ITEM_HEIGHT,
+                                   MENU_RADIUS, ITEM_HOVER);
             }
-            RGBA tc = hovered ? ITEM_TEXT_SEL : HEADER_TEXT;
-            float tx = _x + ITEM_PAD_X;
+            RGBA tc = hovered ? ITEM_TEXT_SEL : ITEM_TEXT;
+
+            float tx = _x + padding;
             if (_icons && _icons->ready() && it.icon_id != 0) {
-                float isz = _icons->icon_size();
-                float iy_icon = iy + (ITEM_HEIGHT - isz) * 0.5f;
-                _icons->draw_icon(it.icon_id, tx, iy_icon, tc);
-                tx += isz + 4.f;
+                float icon_sz = _icons->icon_size();
+                float ix = std::roundf(_x + 0.2f * ITEM_HEIGHT);
+                float iy_icon = std::roundf(iy + 0.5f * (ITEM_HEIGHT - icon_sz));
+                _icons->draw_icon(it.icon_id, ix, iy_icon, tc);
+                tx = _x + padding + ITEM_HEIGHT;
             }
+
             float ty = iy + (ITEM_HEIGHT - _font->line_height()) * 0.5f;
+
+            // Reserve right-side space for the submenu arrow (ARROW_PAD_R + padding).
+            float text_max_w = _w - (tx - _x) - ARROW_PAD_R - padding;
             std::string label = it.text.empty() ? it.menu_idname : it.text;
+            label = clip_text_middle(_font, label, text_max_w);
             _font->draw_text(label, tx, ty, tc);
+
             if (it.mnemonic != 0) {
                 auto mpos = label.find(it.mnemonic);
                 if (mpos != std::string::npos) {
-                    float bw = _font->measure_text(std::string_view(label).substr(0, mpos));
-                    float cw = _font->measure_text(std::string_view(label).substr(mpos, 1));
+                    float bw = _font->measure_text(label.substr(0, mpos));
+                    float cw = _font->measure_text(label.substr(mpos, 1));
                     float ul_y = ty + _font->ascent() + 1.f;
                     _rb->draw_line_h(tx + bw, ul_y, cw, tc);
                 }
             }
-            // Submenu arrow — widget_draw_submenu_tria() / draw_anti_tria_rect().
-            // Size: ICON_DEFAULT_HEIGHT(16) * 0.4 = 6.4px (BLI_rctf_scale(&r, 0.4f)).
-            // Position: center_x = xmax - ICON_DEFAULT_HEIGHT/2 = xmax - 8px.
-            // Color: wcol->text at 80% alpha (col[3] *= 0.8f).
-            // ICON_DEFAULT_HEIGHT scales with UI_SCALE; arrow is 40% of that.
-            const float ARROW_SZ = 16.f * UI_SCALE * 0.4f;
+
+            // Submenu arrow — widget_draw_submenu_tria().
+            // Blender: tria_height = ICON_DEFAULT_HEIGHT (16px scaled).
+            //          tria_width  = ICON_DEFAULT_WIDTH  - 2 * pixelsize.
+            //          BLI_rctf_scale(&r, 0.4f) → effective size ≈ 40% of icon size.
+            //          Placed at xmax - tria_width, centred vertically.
+            //          Color: wcol->text at 80% alpha.
+            const float TRIA_H = 16.f * UI_SCALE * 0.4f;
+            const float TRIA_W = (16.f * UI_SCALE - 2.f) * 0.4f;
             RGBA arrow_c{tc.r, tc.g, tc.b, (unsigned char)(tc.a * 0.8f)};
-            float ax = _x + _w - 8.f * UI_SCALE - ARROW_SZ * 0.5f; // center at xmax - 8*scale
-            float ay = iy + (ITEM_HEIGHT - ARROW_SZ) * 0.5f;
-            _rb->draw_triangle_right(ax, ay, ARROW_SZ, ARROW_SZ, arrow_c);
+            float ax = _x + _w - padding - TRIA_W;
+            float ay = iy + (ITEM_HEIGHT - TRIA_H) * 0.5f;
+            _rb->draw_triangle_right(ax, ay, TRIA_W, TRIA_H, arrow_c);
         }
     }, item);
 }
 
+// ---------------------------------------------------------------------------
+// Draw
+// ---------------------------------------------------------------------------
+
 void PopupMenu::draw() {
     if (_closed) return;
 
-    // Background + outline
+    // Soft drop shadow — widget_softshadow(rect, CNR_ALL, 0.25f * widget_unit).
+    // Called before the background so it appears beneath.
+    const float shadow_px = 0.25f * ITEM_HEIGHT;
+    _rb->draw_softshadow(_x, _y, _w, _h, MENU_RADIUS, shadow_px);
+
+    // Menu background + outline — wcol_menu_back.
     _rb->draw_roundbox(_x, _y, _w, _h,
                        MENU_RADIUS,
                        MENU_BG,
@@ -233,7 +322,6 @@ void PopupMenu::draw() {
 // ---------------------------------------------------------------------------
 
 bool PopupMenu::handle_mouse(float mx, float my, bool clicked) {
-    // Delegate to open submenu first
     if (_submenu) {
         if (_submenu->handle_mouse(mx, my, clicked)) {
             if (_submenu->is_closed()) {
@@ -247,7 +335,6 @@ bool PopupMenu::handle_mouse(float mx, float my, bool clicked) {
         }
     }
 
-    // Click outside → close
     if (clicked) {
         if (mx < _x || mx > _x + _w || my < _y || my > _y + _h) {
             _closed = true;
@@ -255,9 +342,9 @@ bool PopupMenu::handle_mouse(float mx, float my, bool clicked) {
         }
     }
 
-    // Hit-test items
     _hovered = -1;
-    float local_y = my - _y - std::roundf(2.f * UI_SCALE);
+    const float pad_top  = std::roundf(2.f * UI_SCALE);
+    float local_y = my - _y - pad_top;
     for (const auto& ir : _item_rects) {
         if (!ir.clickable) continue;
         if (local_y >= ir.y0 && local_y < ir.y1) {
@@ -281,7 +368,6 @@ bool PopupMenu::handle_mouse(float mx, float my, bool clicked) {
         return true;
     }
 
-    // Hover-open submenu for MenuRefItem
     if (_hovered >= 0) {
         const LayoutItem& item = _items()[_hovered];
         bool is_sub = std::visit([](auto&& it) {

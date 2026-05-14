@@ -264,4 +264,31 @@ void Roundbox::draw_checkmark(float x, float y, float w, float h, RGBA color) {
     _gfx->draw_triangles(_check_buf, LAYOUT_POS2, 0, 12);
 }
 
+// ---------------------------------------------------------------------------
+// draw_softshadow
+// Replicates Blender's widget_softshadow(rect, CNR_ALL, radin).
+// Blender draws 5 expanding rounded-rect rings with decreasing alpha,
+// from inner (closest to box, darkest) to outer (farthest, lightest).
+// We render outer → inner so each subsequent draw overwrites the center,
+// leaving only the ring border visible as the shadow.
+// ---------------------------------------------------------------------------
+
+void Roundbox::draw_softshadow(float x, float y, float w, float h,
+                                float radius, float shadow_px) {
+    const int steps = 5;
+    for (int i = 0; i < steps; ++i) {
+        // i=0: outermost ring (most expansion, lightest alpha)
+        // i=steps-1: innermost ring (least expansion, darkest alpha)
+        float t   = float(steps - i) / float(steps);  // 1.0 → 0.2
+        float exp = shadow_px * t;
+        // Alpha increases as we get closer to the box edge.
+        // Matches Blender's approach: max alpha ≈ 30-40 for dark theme.
+        unsigned char a = (unsigned char)(8.f * float(i + 1));  // 8..40
+        RGBA c{0, 0, 0, a};
+        draw_roundbox(x - exp * 0.5f, y - exp * 0.5f,
+                      w + exp, h + exp,
+                      radius + exp * 0.5f, c);
+    }
+}
+
 } // namespace bl_ui

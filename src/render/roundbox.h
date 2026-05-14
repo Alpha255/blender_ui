@@ -60,6 +60,11 @@ public:
     // Source ref: source/blender/editors/interface/interface_widgets.cc:947
     void draw_checkmark(float x, float y, float w, float h, RGBA color);
 
+    // Soft drop shadow for popup menus.
+    // Replicates Blender's widget_softshadow(rect, CNR_ALL, 0.25f * widget_unit).
+    // shadow_px: shadow spread radius in logical pixels (Blender uses 0.25 * widget_unit).
+    void draw_softshadow(float x, float y, float w, float h, float radius, float shadow_px);
+
 private:
     gfx::Backend*      _gfx       = nullptr;
 
